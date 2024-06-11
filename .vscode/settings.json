@@ -1,0 +1,8 @@
+{
+    "files.eol": "\n",
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true,
+    "editor.renderWhitespace": "all",
+    "editor.inlayHints.enabled": "offUnlessPressed",
+    "editor.rulers": [100],
+}
