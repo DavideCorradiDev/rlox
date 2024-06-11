@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        "asciidoctor.asciidoctor-vscode",
+        "eamodio.gitlens",
+        "github.vscode-github-actions",
+        "ms-vscode.cpptools",
+        "tamasfe.even-better-toml",
+        "rust-lang.rust-analyzer",
+    ],
+    "unwantedRecommendations": []
+}

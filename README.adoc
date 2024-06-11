@@ -1,4 +1,4 @@
 = rlox
 
-A lox compiler written in Rust.
-lox is a language described in the book "`crafting interpreters`".
+A Rust implementation of a lox language interpreter.
+lox is the language described in the book "`crafting interpreters`".
