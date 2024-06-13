@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use std::{fs, io};
 
-use crate::{Lexer, LexerErrors};
+use crate::{AstPrint, Lexer, LexerErrors, Parser, ParserError};
 
 #[derive(Debug, Clone)]
 pub struct Interpreter {}
@@ -26,7 +26,8 @@ impl Interpreter {
             if io::stdin().read_line(&mut line)? == 0 {
                 break;
             }
-            if line.trim() == "quit" {
+            let line = line.trim();
+            if line == "quit" {
                 break;
             }
 
@@ -46,9 +47,19 @@ impl Interpreter {
 
     pub fn run(&self, source: &str) -> Result<(), InterpreterError> {
         let tokens = Lexer::new(source).scan_tokens()?;
-        for token in tokens.into_iter() {
+
+        println!("=== LEXING ===");
+        println!("Lexer output:");
+        for token in tokens.iter() {
             println!("{token:?}");
         }
+
+        let ast = Parser::new(tokens).parse()?;
+
+        println!("=== PARSING ===");
+        println!("Parser output:");
+        println!("{}", ast.ast_print());
+
         Ok(())
     }
 }
@@ -59,4 +70,6 @@ pub enum InterpreterError {
     IoError(#[from] io::Error),
     #[error("Lexer error:\n{0}")]
     LexerError(#[from] LexerErrors),
+    #[error("Parser error:\n{0}")]
+    ParserError(#[from] ParserError),
 }

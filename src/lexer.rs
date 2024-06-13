@@ -26,6 +26,13 @@ impl<'a> Lexer<'a> {
 
     pub fn scan_tokens(mut self) -> Result<Vec<Token>, LexerErrors> {
         while self.scan_token() {}
+
+        self.tokens.push(Token {
+            line: self.current_line,
+            lexeme: String::new(),
+            kind: TokenKind::Eof,
+        });
+
         if self.errors.0.is_empty() {
             Ok(self.tokens)
         } else {
@@ -47,7 +54,9 @@ impl<'a> Lexer<'a> {
                     '-' => self.add_token(TokenKind::Minus),
                     '+' => self.add_token(TokenKind::Plus),
                     ';' => self.add_token(TokenKind::Semicolon),
+                    ':' => self.add_token(TokenKind::Colon),
                     '*' => self.add_token(TokenKind::Star),
+                    '?' => self.add_token(TokenKind::QuestionMark),
 
                     '!' => self.add_token_switch('=', TokenKind::BangEqual, TokenKind::Bang),
                     '=' => self.add_token_switch('=', TokenKind::EqualEqual, TokenKind::Equal),
@@ -217,11 +226,12 @@ impl<'a> Lexer<'a> {
             if c == '\n' {
                 self.current_line += 1;
             } else if c == '*' && self.next_if_eq('/') {
-                break;
+                return;
             } else if c == '/' && self.next_if_eq('*') {
                 self.skip_comment_block();
             }
         }
+        self.add_error(LexerErrorKind::UnterminatedComment);
     }
 
     fn add_error(&mut self, kind: LexerErrorKind) {
@@ -239,7 +249,7 @@ pub struct Token {
     pub kind: TokenKind,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     // Single-character tokens.
     LeftParen,
@@ -251,8 +261,10 @@ pub enum TokenKind {
     Minus,
     Plus,
     Semicolon,
+    Colon,
     Slash,
     Star,
+    QuestionMark,
     // One or two character tokens.
     Bang,
     BangEqual,
@@ -319,4 +331,6 @@ pub enum LexerErrorKind {
     UnexpectedCharacter(char),
     #[error("unterminated string")]
     UnterminatedString,
+    #[error("unterminated comment")]
+    UnterminatedComment,
 }
