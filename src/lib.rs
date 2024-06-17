@@ -1,5 +1,5 @@
-mod interpreter;
-pub use interpreter::*;
+mod rlox;
+pub use rlox::*;
 
 mod lexer;
 pub use lexer::*;
@@ -9,3 +9,6 @@ pub use expression::*;
 
 mod parser;
 pub use parser::*;
+
+mod interpreter;
+pub use interpreter::*;

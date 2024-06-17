@@ -1,5 +1,5 @@
 use clap::Parser;
-use rlox::Interpreter;
+use rlox::RLox;
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -10,8 +10,8 @@ struct Args {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     match args.file_path {
-        Some(file_path) => Interpreter::new().run_file(&file_path)?,
-        None => Interpreter::new().run_prompt()?,
+        Some(file_path) => RLox::new().run_file(&file_path)?,
+        None => RLox::new().run_prompt()?,
     }
     Ok(())
 }

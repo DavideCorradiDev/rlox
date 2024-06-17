@@ -2,12 +2,54 @@ use crate::Token;
 
 use std::fmt::Debug;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Nil,
     Bool(bool),
     Number(f64),
     String(String),
+}
+
+impl Value {
+    pub fn into_bool(self) -> Option<bool> {
+        match self {
+            Self::Bool(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn into_number(self) -> Option<f64> {
+        match self {
+            Self::Number(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn into_string(self) -> Option<String> {
+        match self {
+            Self::String(v) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn is_truthy(&self) -> bool {
+        match self {
+            Self::Nil => false,
+            Self::Bool(v) => *v,
+            _ => true,
+        }
+    }
+}
+
+impl std::fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Nil => write!(f, "nil"),
+            Value::Bool(b) => write!(f, "{b:?}"),
+            Value::Number(n) => write!(f, "{n}"),
+            Value::String(s) => write!(f, "{s}"),
+        }
+    }
 }
 
 impl From<bool> for Value {
