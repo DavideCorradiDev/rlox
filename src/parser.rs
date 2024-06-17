@@ -46,86 +46,43 @@ impl Parser {
     }
 
     fn comma(&mut self) -> Result<Expr, ParserError> {
-        let mut expr = self.equality()?;
-        loop {
-            let token = self.peek();
-            match token.kind {
-                TokenKind::Comma => {
-                    self.advance();
-                    let right = self.equality()?;
-                    expr = Expr::binary(token, expr, right);
-                }
-                _ => break,
-            }
-        }
-        Ok(expr)
+        self.match_many_optional(|x| matches!(x.kind, TokenKind::Comma), Self::equality)
     }
 
     fn equality(&mut self) -> Result<Expr, ParserError> {
-        let mut expr = self.comparison()?;
-        loop {
-            let token = self.peek();
-            match token.kind {
-                TokenKind::BangEqual | TokenKind::EqualEqual => {
-                    self.advance();
-                    let right = self.comparison()?;
-                    expr = Expr::binary(token, expr, right);
-                }
-                _ => break,
-            }
-        }
-        Ok(expr)
+        self.match_many_optional(
+            |x| matches!(x.kind, TokenKind::BangEqual | TokenKind::EqualEqual),
+            Self::comparison,
+        )
     }
 
     fn comparison(&mut self) -> Result<Expr, ParserError> {
-        let mut expr = self.term()?;
-        loop {
-            let token = self.peek();
-            match token.kind {
-                TokenKind::Greater
-                | TokenKind::GreaterEqual
-                | TokenKind::Less
-                | TokenKind::LessEqual => {
-                    self.advance();
-                    let right = self.term()?;
-                    expr = Expr::binary(token, expr, right);
-                }
-                _ => break,
-            }
-        }
-        Ok(expr)
+        self.match_many_optional(
+            |x| {
+                matches!(
+                    x.kind,
+                    TokenKind::Greater
+                        | TokenKind::GreaterEqual
+                        | TokenKind::Less
+                        | TokenKind::LessEqual
+                )
+            },
+            Self::term,
+        )
     }
 
     fn term(&mut self) -> Result<Expr, ParserError> {
-        let mut expr = self.factor()?;
-        loop {
-            let token = self.peek();
-            match token.kind {
-                TokenKind::Minus | TokenKind::Plus => {
-                    self.advance();
-                    let right = self.factor()?;
-                    expr = Expr::binary(token, expr, right);
-                }
-                _ => break,
-            }
-        }
-        Ok(expr)
+        self.match_many_optional(
+            |x| matches!(x.kind, TokenKind::Minus | TokenKind::Plus),
+            Self::factor,
+        )
     }
 
     fn factor(&mut self) -> Result<Expr, ParserError> {
-        let mut expr = self.unary()?;
-        loop {
-            let token = self.peek();
-            match token.kind {
-                TokenKind::Slash | TokenKind::Star => {
-                    self.advance();
-                    let right = self.unary()?;
-                    expr = Expr::binary(token, expr, right);
-                }
-                _ => break,
-            }
-        }
-        Ok(expr)
+        self.match_many_optional(
+            |x| matches!(x.kind, TokenKind::Slash | TokenKind::Star),
+            Self::unary,
+        )
     }
 
     fn unary(&mut self) -> Result<Expr, ParserError> {
@@ -192,6 +149,25 @@ impl Parser {
             }
             _ => Err(ParserError::new(&token, ParserErrorKind::InvalidExpression)),
         }
+    }
+
+    fn match_many_optional(
+        &mut self,
+        match_fn: fn(&Token) -> bool,
+        sub_fn: fn(&mut Self) -> Result<Expr, ParserError>,
+    ) -> Result<Expr, ParserError> {
+        let mut expr = sub_fn(self)?;
+        loop {
+            let token = self.peek();
+            if match_fn(&token) {
+                self.advance();
+                let right = sub_fn(self)?;
+                expr = Expr::binary(token, expr, right);
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
     }
 
     // fn synchronize(&mut self) {

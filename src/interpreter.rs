@@ -73,11 +73,11 @@ impl Interpreter {
     }
 }
 
-pub trait Evaluable {
+pub trait Evaluatable {
     fn evaluate(self) -> Result<Value, InterpreterError>;
 }
 
-impl Evaluable for Expr {
+impl Evaluatable for Expr {
     fn evaluate(self) -> Result<Value, InterpreterError> {
         match self {
             Self::Literal { value } => Ok(value),
@@ -151,9 +151,17 @@ impl Evaluable for Expr {
                         if let Value::String(right) = right {
                             return Ok(Value::from(format!("{left}{right}")));
                         }
-                        let (left, right) = expect_numbers(&operator, left, right)?;
-                        Ok(Value::from(left + right))
+                        if let Value::Number(left) = left {
+                            if let Value::Number(right) = right {
+                                return Ok(Value::from(left + right));
+                            }
+                        }
+                        Err(InterpreterError::new(
+                            &operator,
+                            InterpreterErrorKind::ExpectedNumbersOrOneString,
+                        ))
                     }
+                    TokenKind::Comma => Ok(right),
                     _ => panic!("unimplemented binary operator"),
                 }
             }
@@ -222,6 +230,8 @@ pub enum InterpreterErrorKind {
     ExpectedNumbers,
     #[error("operands must be strings or numbers")]
     ExpectedStringsOrNumbers,
+    #[error("operands must be numbers or at least one of them must be a string")]
+    ExpectedNumbersOrOneString,
     #[error("division by zero")]
     DivisionByZero,
 }
