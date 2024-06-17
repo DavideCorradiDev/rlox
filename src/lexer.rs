@@ -24,7 +24,7 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn scan_tokens(mut self) -> Result<Vec<Token>, LexerErrors> {
+    pub fn run(mut self) -> Result<Vec<Token>, LexerErrors> {
         while self.scan_token() {}
 
         self.tokens.push(Token {

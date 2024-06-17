@@ -13,7 +13,7 @@ impl Parser {
         Self { tokens, current: 0 }
     }
 
-    pub fn parse(mut self) -> Result<Expr, ParserError> {
+    pub fn run(mut self) -> Result<Expr, ParserError> {
         self.expression()
     }
 
