@@ -75,6 +75,13 @@ pub enum Expr {
     Literal {
         value: Value,
     },
+    Variable {
+        name: Token,
+    },
+    Assign {
+        name: Token,
+        value: Box<Expr>,
+    },
     Unary {
         operator: Token,
         right: Box<Expr>,
@@ -102,6 +109,17 @@ impl Expr {
     {
         Self::Literal {
             value: value.into(),
+        }
+    }
+
+    pub fn variable(name: Token) -> Self {
+        Self::Variable { name }
+    }
+
+    pub fn assign(name: Token, value: Expr) -> Self {
+        Self::Assign {
+            name,
+            value: Box::new(value),
         }
     }
 
@@ -136,6 +154,28 @@ impl Expr {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum Stmt {
+    Block { statements: Vec<Stmt> },
+    Expression { expr: Expr },
+    Print { expr: Expr },
+    Var { name: Token, initializer: Expr },
+}
+
+impl Stmt {
+    pub fn expression(expr: Expr) -> Self {
+        Self::Expression { expr }
+    }
+
+    pub fn print(expr: Expr) -> Self {
+        Self::Print { expr }
+    }
+
+    pub fn var(name: Token, initializer: Expr) -> Self {
+        Self::Var { name, initializer }
+    }
+}
+
 pub trait AstPrint {
     fn ast_print(&self) -> String;
 }
@@ -146,7 +186,7 @@ impl AstPrint for Value {
             Value::Nil => "nil".to_string(),
             Value::Bool(b) => b.to_string(),
             Value::Number(n) => n.to_string(),
-            Value::String(s) => s.clone(),
+            Value::String(s) => format!("\"{s}\""),
         }
     }
 }
@@ -155,6 +195,8 @@ impl AstPrint for Expr {
     fn ast_print(&self) -> String {
         match self {
             Self::Literal { value } => value.ast_print(),
+            Self::Variable { name } => format!("{}", name.lexeme),
+            Self::Assign { name, value } => format!("assign {} {}", name.lexeme, value.ast_print()),
             Self::Unary { operator, right } => {
                 format!("({} {})", operator.lexeme, right.ast_print())
             }
@@ -186,6 +228,26 @@ impl AstPrint for Expr {
             }
             Self::Grouping { expr } => {
                 format!("(group {})", expr.ast_print())
+            }
+        }
+    }
+}
+
+impl AstPrint for Stmt {
+    fn ast_print(&self) -> String {
+        match self {
+            Self::Block { statements } => {
+                let block_str = statements
+                    .iter()
+                    .map(|x| format!("  {}", x.ast_print()))
+                    .collect::<Vec<String>>()
+                    .join("\n");
+                format!("{{\n{block_str}\n}}")
+            }
+            Self::Expression { expr } => format!("expression {};", expr.ast_print()),
+            Self::Print { expr } => format!("print {};", expr.ast_print()),
+            Self::Var { name, initializer } => {
+                format!("var {} = {};", name.lexeme, initializer.ast_print())
             }
         }
     }

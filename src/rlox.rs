@@ -2,17 +2,23 @@ use thiserror::Error;
 
 use std::{fs, io};
 
-use crate::{AstPrint, Interpreter, InterpreterError, Lexer, LexerErrors, Parser, ParserError};
+use crate::{AstPrint, Interpreter, InterpreterError, Lexer, LexerErrors, Parser, ParserErrors};
 
 #[derive(Debug, Clone)]
-pub struct RLox {}
+pub struct RLox {
+    interpreter: Interpreter,
+    verbose: bool,
+}
 
 impl RLox {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new(verbose: bool) -> Self {
+        Self {
+            interpreter: Interpreter::new(),
+            verbose,
+        }
     }
 
-    pub fn run_prompt(&self) -> Result<(), RLoxError> {
+    pub fn run_prompt(&mut self) -> Result<(), RLoxError> {
         use std::io::Write;
 
         let mut line = String::new();
@@ -40,29 +46,39 @@ impl RLox {
         Ok(())
     }
 
-    pub fn run_file(&self, file_path: &std::path::Path) -> Result<(), RLoxError> {
+    pub fn run_file(&mut self, file_path: &std::path::Path) -> Result<(), RLoxError> {
         let file_content = fs::read_to_string(file_path)?;
-        self.run(&file_content)
+        if let Err(error) = self.run(&file_content) {
+            println!("{error}");
+        }
+        Ok(())
     }
 
-    pub fn run(&self, source: &str) -> Result<(), RLoxError> {
-        let tokens = Lexer::new(source).run()?;
-
-        println!("=== LEXING ===");
-        println!("Lexer output:");
-        for token in tokens.iter() {
-            println!("{token:?}");
+    pub fn run(&mut self, source: &str) -> Result<(), RLoxError> {
+        if self.verbose {
+            println!("=== LEXER ===");
+        }
+        let tokens = Lexer::run(source)?;
+        if self.verbose {
+            for token in tokens.iter() {
+                println!("{token:?}");
+            }
         }
 
-        let ast = Parser::new(tokens).run()?;
+        if self.verbose {
+            println!("=== PARSER ===");
+        }
+        let statements = Parser::run(tokens)?;
+        if self.verbose {
+            for statement in statements.iter() {
+                println!("{}", statement.ast_print());
+            }
+        }
 
-        println!("=== PARSING ===");
-        println!("Parser output:");
-        println!("{}", ast.ast_print());
-
-        let res = Interpreter::new(ast).run()?;
-        println!("=== INTERPRETING ===");
-        println!("{}", res.ast_print());
+        if self.verbose {
+        println!("=== INTERPRETER ===");
+        }
+        self.interpreter.run(statements)?;
 
         Ok(())
     }
@@ -72,10 +88,10 @@ impl RLox {
 pub enum RLoxError {
     #[error("I/O error ({0})")]
     IoError(#[from] io::Error),
-    #[error("Lexer error:\n{0}")]
+    #[error("Lexer encountered errors:\n{0}")]
     LexerError(#[from] LexerErrors),
-    #[error("Parser error:\n{0}")]
-    ParserError(#[from] ParserError),
-    #[error("Interpreter error:\n{0}")]
+    #[error("Parser encountered errors:\n{0}")]
+    ParserError(#[from] ParserErrors),
+    #[error("Interpreter encountered error:\n{0}")]
     InterpreterError(#[from] InterpreterError),
 }
