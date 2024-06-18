@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::{Expr, Token, TokenKind, Value};
+use crate::{Environment, Expr, Stmt, Token, TokenKind, Value};
 
 pub enum ValuePair {
     Numbers(f64, f64),
@@ -58,32 +58,78 @@ fn expect_strings_or_numbers(
     ))
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Interpreter {
-    expr: Expr,
+    environment: Environment,
 }
 
 impl Interpreter {
-    pub fn new(expr: Expr) -> Self {
-        Self { expr }
+    pub fn new() -> Self {
+        Self {
+            environment: Environment::new(),
+        }
     }
 
-    pub fn run(self) -> Result<Value, InterpreterError> {
-        self.expr.evaluate()
+    pub fn run(&mut self, statements: Vec<Stmt>) -> Result<(), InterpreterError> {
+        self.evaluate_stmts(statements)
     }
-}
 
-pub trait Evaluatable {
-    fn evaluate(self) -> Result<Value, InterpreterError>;
-}
+    fn evaluate_stmts(&mut self, statements: Vec<Stmt>) -> Result<(), InterpreterError> {
+        for statement in statements {
+            self.evaluate_stmt(statement)?;
+        }
+        Ok(())
+    }
 
-impl Evaluatable for Expr {
-    fn evaluate(self) -> Result<Value, InterpreterError> {
-        match self {
-            Self::Literal { value } => Ok(value),
-            Self::Grouping { expr } => expr.evaluate(),
-            Self::Unary { operator, right } => {
-                let right = right.evaluate()?;
+    fn evaluate_stmt(&mut self, statement: Stmt) -> Result<(), InterpreterError> {
+        match statement {
+            Stmt::Block { statements } => {
+                self.environment.push_scope();
+                let result = self.evaluate_stmts(statements);
+                self.environment.pop_scope();
+                return result;
+            }
+            Stmt::Print { expr } => {
+                let value = self.evaluate_expr(expr)?;
+                println!("{}", value.to_string());
+            }
+            Stmt::Expression { expr } => {
+                self.evaluate_expr(expr)?;
+            }
+            Stmt::Var { name, initializer } => {
+                let value = self.evaluate_expr(initializer)?;
+                self.environment.define(name.lexeme.clone(), value);
+            }
+        }
+        Ok(())
+    }
+
+    fn evaluate_expr(&mut self, expression: Expr) -> Result<Value, InterpreterError> {
+        match expression {
+            Expr::Literal { value } => Ok(value),
+            Expr::Variable { name } => match self.environment.get(&name.lexeme) {
+                Some(v) => Ok(v.clone()),
+                None => Err(InterpreterError::new(
+                    &name,
+                    InterpreterErrorKind::UndefinedVariable,
+                )),
+            },
+            Expr::Assign { name, value } => {
+                let value = self.evaluate_expr(*value)?;
+                match self.environment.get_mut(&name.lexeme) {
+                    Some(v) => {
+                        *v = value;
+                        Ok(v.clone())
+                    }
+                    None => Err(InterpreterError::new(
+                        &name,
+                        InterpreterErrorKind::UndefinedVariable,
+                    )),
+                }
+            }
+            Expr::Grouping { expr } => self.evaluate_expr(*expr),
+            Expr::Unary { operator, right } => {
+                let right = self.evaluate_expr(*right)?;
                 match operator.kind {
                     TokenKind::Minus => {
                         let right = expect_number(&operator, right)?;
@@ -93,13 +139,13 @@ impl Evaluatable for Expr {
                     _ => panic!("unimplemented unary operator"),
                 }
             }
-            Self::Binary {
+            Expr::Binary {
                 operator,
                 left,
                 right,
             } => {
-                let left = left.evaluate()?;
-                let right = right.evaluate()?;
+                let left = self.evaluate_expr(*left)?;
+                let right = self.evaluate_expr(*right)?;
                 match operator.kind {
                     TokenKind::Greater => {
                         match expect_strings_or_numbers(&operator, left, right)? {
@@ -165,20 +211,20 @@ impl Evaluatable for Expr {
                     _ => panic!("unimplemented binary operator"),
                 }
             }
-            Self::Ternary {
+            Expr::Ternary {
                 operator,
                 expr,
                 left,
                 right,
             } => {
-                let expr = expr.evaluate()?;
+                let expr = self.evaluate_expr(*expr)?;
                 match operator.kind {
                     TokenKind::QuestionMark => {
                         let expr = expect_bool(&operator, expr)?;
                         if expr {
-                            Ok(left.evaluate()?)
+                            Ok(self.evaluate_expr(*left)?)
                         } else {
-                            Ok(right.evaluate()?)
+                            Ok(self.evaluate_expr(*right)?)
                         }
                     }
                     _ => panic!("unimplemented ternary operator"),
@@ -234,4 +280,6 @@ pub enum InterpreterErrorKind {
     ExpectedNumbersOrOneString,
     #[error("division by zero")]
     DivisionByZero,
+    #[error("undefined variable")]
+    UndefinedVariable,
 }
