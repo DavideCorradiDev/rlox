@@ -1,6 +1,24 @@
 = Lox grammar
 
+program        → declaration* EOF ;
+
+declaration    → varDecl
+               | statement ;
+
+varDecl        → "var" IDENTIFIER ( "=" expression )? ";" ;
+
+statement      → exprStmt
+               | printStmt
+               | block;
+
+block          → "{" declaration* "}" ;
+
+exprStmt       → expression ";" ;
+printStmt      → "print" expression ";" ;
+
 expression     → condition
+assignment     → IDENTIFIER "=" assignment
+               | conditional ;
 conditional    → comma ( "?" comma ":" comma )?
 comma          → equality ( "," equality )* ;
 equality       → comparison ( ( "!=" | "==" ) comparison )* ;
@@ -9,7 +27,8 @@ term           → factor ( ( "-" | "+" ) factor )* ;
 factor         → unary ( ( "/" | "*" ) unary )* ;
 unary          → ( "!" | "-" ) unary
                | primary ;
-primary        → NUMBER | STRING | "true" | "false" | "nil"
+primary        → "true" | "false" | "nil"
+               | NUMBER | STRING | IDENTIFIER
                | "(" expression ")" ;
                | ( "!=" | "==" ) equality
                | ( ">" | ">=" | "<" | "<=" ) comparison

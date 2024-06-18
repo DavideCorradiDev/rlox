@@ -1,4 +1,4 @@
-use crate::{Expr, Token, TokenKind, Value};
+use crate::{Expr, Stmt, Token, TokenKind, Value};
 
 use thiserror::Error;
 
@@ -9,39 +9,139 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(tokens: Vec<Token>) -> Self {
-        Self { tokens, current: 0 }
+    pub fn run(tokens: Vec<Token>) -> Result<Vec<Stmt>, ParserErrors> {
+        let parser = Self { tokens, current: 0 };
+        parser.parse()
     }
 
-    pub fn run(mut self) -> Result<Expr, ParserError> {
-        self.expression()
+    fn parse(mut self) -> Result<Vec<Stmt>, ParserErrors> {
+        let mut statements = Vec::new();
+        let mut errors = ParserErrors(Vec::new());
+        while !self.is_at_end() {
+            match self.declaration() {
+                Ok(statement) => statements.push(statement),
+                Err(err) => {
+                    errors.0.push(err);
+                    self.synchronize();
+                }
+            }
+        }
+        if errors.0.is_empty() {
+            Ok(statements)
+        } else {
+            Err(errors)
+        }
+    }
+
+    fn declaration(&mut self) -> Result<Stmt, ParserError> {
+        if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Var))
+            .is_some()
+        {
+            self.var_declaration()
+        } else {
+            self.statement()
+        }
+    }
+
+    fn var_declaration(&mut self) -> Result<Stmt, ParserError> {
+        let name = self.consume(
+            |x| matches!(x.kind, TokenKind::Identifier(_)),
+            ParserErrorKind::MissingVarName,
+        )?;
+
+        let initializer = if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Equal))
+            .is_some()
+        {
+            self.expression()?
+        } else {
+            Expr::literal(Value::Nil)
+        };
+
+        self.consume(
+            |x| matches!(x.kind, TokenKind::Semicolon),
+            ParserErrorKind::MissingSemicolon,
+        )?;
+
+        Ok(Stmt::var(name, initializer))
+    }
+
+    fn statement(&mut self) -> Result<Stmt, ParserError> {
+        if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Print))
+            .is_some()
+        {
+            self.print_statement()
+        } else if self
+            .match_optional(|x| matches!(x.kind, TokenKind::LeftBrace))
+            .is_some()
+        {
+            self.block_statement()
+        } else {
+            self.expression_statement()
+        }
+    }
+
+    fn print_statement(&mut self) -> Result<Stmt, ParserError> {
+        let expr = self.expression()?;
+        self.consume(
+            |x| matches!(x.kind, TokenKind::Semicolon),
+            ParserErrorKind::MissingSemicolon,
+        )?;
+        Ok(Stmt::print(expr))
+    }
+
+    fn block_statement(&mut self) -> Result<Stmt, ParserError> {
+        let mut statements = Vec::new();
+        while !self.is_at_end() && !matches!(self.peek().kind, TokenKind::RightBrace) {
+            statements.push(self.declaration()?);
+        }
+        self.consume(
+            |x| matches!(x.kind, TokenKind::RightBrace),
+            ParserErrorKind::UnmatchedBrace,
+        )?;
+        Ok(Stmt::Block { statements })
+    }
+
+    fn expression_statement(&mut self) -> Result<Stmt, ParserError> {
+        let expr = self.expression()?;
+        self.consume(
+            |x| matches!(x.kind, TokenKind::Semicolon),
+            ParserErrorKind::MissingSemicolon,
+        )?;
+        Ok(Stmt::expression(expr))
     }
 
     fn expression(&mut self) -> Result<Expr, ParserError> {
-        self.condition()
+        self.assignment()
+    }
+
+    fn assignment(&mut self) -> Result<Expr, ParserError> {
+        let expr = self.condition()?;
+        if let Some(token) = self.match_optional(|x| matches!(x.kind, TokenKind::Equal)) {
+            let value = self.assignment()?;
+            match expr {
+                Expr::Variable { name } => Ok(Expr::assign(name, value)),
+                _ => Err(ParserError::new(&token, ParserErrorKind::InvalidAssignment)),
+            }
+        } else {
+            Ok(expr)
+        }
     }
 
     fn condition(&mut self) -> Result<Expr, ParserError> {
         let expr = self.comma()?;
-        let token = self.peek();
-        match token.kind {
-            TokenKind::QuestionMark => {
-                self.advance();
-                let left = self.comma()?;
-                let middle_token = self.peek();
-                match middle_token.kind {
-                    TokenKind::Colon => {
-                        self.advance();
-                        let right = self.comma()?;
-                        Ok(Expr::ternary(token, expr, left, right))
-                    }
-                    _ => Err(ParserError::new(
-                        &middle_token,
-                        ParserErrorKind::UnmatchedQuestionMark,
-                    )),
-                }
-            }
-            _ => Ok(expr),
+        if let Some(token) = self.match_optional(|x| matches!(x.kind, TokenKind::QuestionMark)) {
+            let left = self.comma()?;
+            self.consume(
+                |x| matches!(x.kind, TokenKind::Colon),
+                ParserErrorKind::UnmatchedQuestionMark,
+            )?;
+            let right = self.comma()?;
+            Ok(Expr::ternary(token, expr, left, right))
+        } else {
+            Ok(expr)
         }
     }
 
@@ -86,14 +186,13 @@ impl Parser {
     }
 
     fn unary(&mut self) -> Result<Expr, ParserError> {
-        let token = self.peek();
-        match token.kind {
-            TokenKind::Minus | TokenKind::Bang => {
-                self.advance();
-                let right = self.unary()?;
-                Ok(Expr::unary(token, right))
-            }
-            _ => self.primary(),
+        if let Some(token) =
+            self.match_optional(|x| matches!(x.kind, TokenKind::Minus | TokenKind::Bang))
+        {
+            let right = self.unary()?;
+            Ok(Expr::unary(token, right))
+        } else {
+            self.primary()
         }
     }
 
@@ -105,16 +204,14 @@ impl Parser {
             TokenKind::True => Ok(Expr::literal(true)),
             TokenKind::Number(n) => Ok(Expr::literal(n)),
             TokenKind::String(s) => Ok(Expr::literal(s)),
+            TokenKind::Identifier(_) => Ok(Expr::variable(token)),
             TokenKind::LeftParen => {
                 let expr = self.expression()?;
-                let token = self.peek();
-                match token.kind {
-                    TokenKind::RightParen => {
-                        self.advance();
-                        Ok(Expr::grouping(expr))
-                    }
-                    _ => Err(ParserError::new(&token, ParserErrorKind::UnmatchedParen)),
-                }
+                self.consume(
+                    |x| matches!(x.kind, TokenKind::RightParen),
+                    ParserErrorKind::UnmatchedParen,
+                )?;
+                Ok(Expr::grouping(expr))
             }
             TokenKind::BangEqual | TokenKind::EqualEqual => {
                 self.equality()?;
@@ -151,41 +248,63 @@ impl Parser {
         }
     }
 
+    fn match_optional(&mut self, match_fn: fn(&Token) -> bool) -> Option<Token> {
+        let token = self.peek();
+        if match_fn(&token) {
+            self.advance();
+            Some(token)
+        } else {
+            None
+        }
+    }
+
     fn match_many_optional(
         &mut self,
         match_fn: fn(&Token) -> bool,
         sub_fn: fn(&mut Self) -> Result<Expr, ParserError>,
     ) -> Result<Expr, ParserError> {
         let mut expr = sub_fn(self)?;
-        loop {
-            let token = self.peek();
-            if match_fn(&token) {
-                self.advance();
-                let right = sub_fn(self)?;
-                expr = Expr::binary(token, expr, right);
-            } else {
-                break;
-            }
+        while let Some(token) = self.match_optional(match_fn) {
+            let right = sub_fn(self)?;
+            expr = Expr::binary(token, expr, right);
         }
         Ok(expr)
     }
 
-    // fn synchronize(&mut self) {
-    //     while let Some(token) = self.next() {
-    //         match token.kind {
-    //             TokenKind::Semicolon => { break },
-    //             _ => if let Some(token) = self.peek() {
-    //                 match token.kind {
-    //                     TokenKind::Class | TokenKind::Fun | TokenKind::Var | TokenKind::If |
-    //                     TokenKind::For | TokenKind::While | TokenKind::Print | TokenKind::Return
-    // => {                         break;
-    //                     }
-    //                     _ => { self.advance() }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
+    fn consume(
+        &mut self,
+        match_fn: fn(&Token) -> bool,
+        error_kind: ParserErrorKind,
+    ) -> Result<Token, ParserError> {
+        let token = self.peek();
+        if match_fn(&token) {
+            self.advance();
+            Ok(token)
+        } else {
+            Err(ParserError::new(&token, error_kind))
+        }
+    }
+
+    fn synchronize(&mut self) {
+        while !self.is_at_end() {
+            match self.next().kind {
+                TokenKind::Semicolon => break,
+                _ => match self.peek().kind {
+                    TokenKind::Class
+                    | TokenKind::Fun
+                    | TokenKind::Var
+                    | TokenKind::If
+                    | TokenKind::For
+                    | TokenKind::While
+                    | TokenKind::Print
+                    | TokenKind::Return => {
+                        break;
+                    }
+                    _ => (),
+                },
+            }
+        }
+    }
 
     fn advance(&mut self) {
         assert!(self.current + 1 < self.tokens.len());
@@ -203,6 +322,29 @@ impl Parser {
             _ => self.advance(),
         }
         token
+    }
+
+    fn is_at_end(&self) -> bool {
+        if let TokenKind::Eof = self.peek().kind {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug, Clone, Error)]
+pub struct ParserErrors(Vec<ParserError>);
+
+impl std::fmt::Display for ParserErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let error_msg = self
+            .0
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<String>>()
+            .join("\n");
+        write!(f, "{error_msg}")
     }
 }
 
@@ -244,8 +386,16 @@ pub enum ParserErrorKind {
     InvalidExpression,
     #[error("expected ')' after expression")]
     UnmatchedParen,
+    #[error("expected '}}' after block")]
+    UnmatchedBrace,
     #[error("expected ':' after '?' and expression")]
     UnmatchedQuestionMark,
     #[error("missing left-hand operand")]
     MissingLeftHandOperand,
+    #[error("expected ';' after expression")]
+    MissingSemicolon,
+    #[error("expected variable name")]
+    MissingVarName,
+    #[error("invalid assignment target")]
+    InvalidAssignment,
 }

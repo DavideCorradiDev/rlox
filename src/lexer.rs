@@ -12,19 +12,20 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(source: &'a str) -> Self {
-        Self {
+    pub fn run(source: &'a str) -> Result<Vec<Token>, LexerErrors> {
+        let lexer = Self {
             tokens: Vec::new(),
             errors: LexerErrors(Vec::new()),
             source: source,
             iter: source.char_indices().peekable(),
             start_idx: 0,
             current_idx: 0,
-            current_line: 0,
-        }
+            current_line: 1,
+        };
+        lexer.scan()
     }
 
-    pub fn run(mut self) -> Result<Vec<Token>, LexerErrors> {
+    fn scan(mut self) -> Result<Vec<Token>, LexerErrors> {
         while self.scan_token() {}
 
         self.tokens.push(Token {
