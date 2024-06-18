@@ -78,6 +78,21 @@ impl Parser {
             .is_some()
         {
             self.block_statement()
+        } else if self
+            .match_optional(|x| matches!(x.kind, TokenKind::If))
+            .is_some()
+        {
+            self.if_statement()
+        } else if self
+            .match_optional(|x| matches!(x.kind, TokenKind::While))
+            .is_some()
+        {
+            self.while_statement()
+        } else if self
+            .match_optional(|x| matches!(x.kind, TokenKind::For))
+            .is_some()
+        {
+            self.for_statement()
         } else {
             self.expression_statement()
         }
@@ -101,7 +116,98 @@ impl Parser {
             |x| matches!(x.kind, TokenKind::RightBrace),
             ParserErrorKind::UnmatchedBrace,
         )?;
-        Ok(Stmt::Block { statements })
+        Ok(Stmt::block(statements))
+    }
+
+    fn if_statement(&mut self) -> Result<Stmt, ParserError> {
+        self.consume(
+            |x| matches!(x.kind, TokenKind::LeftParen),
+            ParserErrorKind::MissingLeftIfParen,
+        )?;
+        let condition = self.expression()?;
+        self.consume(
+            |x| matches!(x.kind, TokenKind::RightParen),
+            ParserErrorKind::MissingRightIfParen,
+        )?;
+        let then_branch = self.statement()?;
+        let else_branch = if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Else))
+            .is_some()
+        {
+            Some(self.statement()?)
+        } else {
+            None
+        };
+        Ok(Stmt::if_statement(condition, then_branch, else_branch))
+    }
+
+    fn while_statement(&mut self) -> Result<Stmt, ParserError> {
+        self.consume(
+            |x| matches!(x.kind, TokenKind::LeftParen),
+            ParserErrorKind::MissingLeftWhileParen,
+        )?;
+        let condition = self.expression()?;
+        self.consume(
+            |x| matches!(x.kind, TokenKind::RightParen),
+            ParserErrorKind::MissingRightWhileParen,
+        )?;
+        let body = self.statement()?;
+        Ok(Stmt::while_statement(condition, body))
+    }
+
+    fn for_statement(&mut self) -> Result<Stmt, ParserError> {
+        self.consume(
+            |x| matches!(x.kind, TokenKind::LeftParen),
+            ParserErrorKind::MissingLeftForParen,
+        )?;
+
+        let initializer = if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Semicolon))
+            .is_some()
+        {
+            None
+        } else if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Var))
+            .is_some()
+        {
+            Some(self.var_declaration()?)
+        } else {
+            Some(self.expression_statement()?)
+        };
+
+        let condition = if matches!(self.peek().kind, TokenKind::Semicolon) {
+            Expr::literal(Value::from(true))
+        } else {
+            self.expression()?
+        };
+        self.consume(
+            |x| matches!(x.kind, TokenKind::Semicolon),
+            ParserErrorKind::MissingForSemicolon,
+        )?;
+
+        let increment = if matches!(self.peek().kind, TokenKind::RightParen) {
+            None
+        } else {
+            Some(self.expression()?)
+        };
+        self.consume(
+            |x| matches!(x.kind, TokenKind::RightParen),
+            ParserErrorKind::MissingRightForParen,
+        )?;
+
+        let mut body = self.statement()?;
+
+        if let Some(increment) = increment {
+            body = Stmt::block(vec![body, Stmt::expression(increment)]);
+        }
+
+        body = Stmt::while_statement(condition, body);
+
+        if let Some(initializer) = initializer {
+            body = Stmt::block(vec![initializer, body]);
+        }
+
+        Ok(body)
     }
 
     fn expression_statement(&mut self) -> Result<Stmt, ParserError> {
@@ -118,7 +224,7 @@ impl Parser {
     }
 
     fn assignment(&mut self) -> Result<Expr, ParserError> {
-        let expr = self.condition()?;
+        let expr = self.or()?;
         if let Some(token) = self.match_optional(|x| matches!(x.kind, TokenKind::Equal)) {
             let value = self.assignment()?;
             match expr {
@@ -130,23 +236,12 @@ impl Parser {
         }
     }
 
-    fn condition(&mut self) -> Result<Expr, ParserError> {
-        let expr = self.comma()?;
-        if let Some(token) = self.match_optional(|x| matches!(x.kind, TokenKind::QuestionMark)) {
-            let left = self.comma()?;
-            self.consume(
-                |x| matches!(x.kind, TokenKind::Colon),
-                ParserErrorKind::UnmatchedQuestionMark,
-            )?;
-            let right = self.comma()?;
-            Ok(Expr::ternary(token, expr, left, right))
-        } else {
-            Ok(expr)
-        }
+    fn or(&mut self) -> Result<Expr, ParserError> {
+        self.match_many_optional_logical(|x| matches!(x.kind, TokenKind::Or), Self::and)
     }
 
-    fn comma(&mut self) -> Result<Expr, ParserError> {
-        self.match_many_optional(|x| matches!(x.kind, TokenKind::Comma), Self::equality)
+    fn and(&mut self) -> Result<Expr, ParserError> {
+        self.match_many_optional_logical(|x| matches!(x.kind, TokenKind::And), Self::equality)
     }
 
     fn equality(&mut self) -> Result<Expr, ParserError> {
@@ -267,6 +362,19 @@ impl Parser {
         while let Some(token) = self.match_optional(match_fn) {
             let right = sub_fn(self)?;
             expr = Expr::binary(token, expr, right);
+        }
+        Ok(expr)
+    }
+
+    fn match_many_optional_logical(
+        &mut self,
+        match_fn: fn(&Token) -> bool,
+        sub_fn: fn(&mut Self) -> Result<Expr, ParserError>,
+    ) -> Result<Expr, ParserError> {
+        let mut expr = sub_fn(self)?;
+        while let Some(token) = self.match_optional(match_fn) {
+            let right = sub_fn(self)?;
+            expr = Expr::logical(token, expr, right);
         }
         Ok(expr)
     }
@@ -396,6 +504,20 @@ pub enum ParserErrorKind {
     MissingSemicolon,
     #[error("expected variable name")]
     MissingVarName,
+    #[error("expected '(' after 'if'")]
+    MissingLeftIfParen,
+    #[error("expected ')' after 'if' condition")]
+    MissingRightIfParen,
+    #[error("expected '(' after 'while'")]
+    MissingLeftWhileParen,
+    #[error("expected ')' after 'while' condition")]
+    MissingRightWhileParen,
+    #[error("expected '(' after 'for'")]
+    MissingLeftForParen,
+    #[error("expected ')' after 'for' clauses")]
+    MissingRightForParen,
+    #[error("expected ';' after 'for' condition")]
+    MissingForSemicolon,
     #[error("invalid assignment target")]
     InvalidAssignment,
 }

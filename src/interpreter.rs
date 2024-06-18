@@ -7,13 +7,6 @@ pub enum ValuePair {
     Strings(String, String),
 }
 
-fn expect_bool(token: &Token, right: Value) -> Result<bool, InterpreterError> {
-    right.into_bool().ok_or(InterpreterError::new(
-        token,
-        InterpreterErrorKind::ExpectedBool,
-    ))
-}
-
 fn expect_number(token: &Token, right: Value) -> Result<f64, InterpreterError> {
     right.into_number().ok_or(InterpreterError::new(
         token,
@@ -70,43 +63,59 @@ impl Interpreter {
         }
     }
 
-    pub fn run(&mut self, statements: Vec<Stmt>) -> Result<(), InterpreterError> {
+    pub fn run(&mut self, statements: &[Stmt]) -> Result<(), InterpreterError> {
         self.evaluate_stmts(statements)
     }
 
-    fn evaluate_stmts(&mut self, statements: Vec<Stmt>) -> Result<(), InterpreterError> {
+    fn evaluate_stmts(&mut self, statements: &[Stmt]) -> Result<(), InterpreterError> {
         for statement in statements {
             self.evaluate_stmt(statement)?;
         }
         Ok(())
     }
 
-    fn evaluate_stmt(&mut self, statement: Stmt) -> Result<(), InterpreterError> {
+    fn evaluate_stmt(&mut self, statement: &Stmt) -> Result<(), InterpreterError> {
         match statement {
+            Stmt::Expression { expr } => {
+                self.evaluate_expr(&expr)?;
+            }
+            Stmt::Print { expr } => {
+                let value = self.evaluate_expr(&expr)?;
+                println!("{}", value.to_string());
+            }
+            Stmt::Var { name, initializer } => {
+                let value = self.evaluate_expr(&initializer)?;
+                self.environment.define(name.lexeme.clone(), value);
+            }
             Stmt::Block { statements } => {
                 self.environment.push_scope();
-                let result = self.evaluate_stmts(statements);
+                let result = self.evaluate_stmts(&statements);
                 self.environment.pop_scope();
                 return result;
             }
-            Stmt::Print { expr } => {
-                let value = self.evaluate_expr(expr)?;
-                println!("{}", value.to_string());
+            Stmt::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                if self.evaluate_expr(&condition)?.is_truthy() {
+                    self.evaluate_stmt(then_branch)?;
+                } else if let Some(else_branch) = else_branch {
+                    self.evaluate_stmt(else_branch)?;
+                }
             }
-            Stmt::Expression { expr } => {
-                self.evaluate_expr(expr)?;
-            }
-            Stmt::Var { name, initializer } => {
-                let value = self.evaluate_expr(initializer)?;
-                self.environment.define(name.lexeme.clone(), value);
+            Stmt::While { condition, body } => {
+                while self.evaluate_expr(&condition)?.is_truthy() {
+                    self.evaluate_stmt(body)?;
+                }
             }
         }
         Ok(())
     }
 
-    fn evaluate_expr(&mut self, expression: Expr) -> Result<Value, InterpreterError> {
+    fn evaluate_expr(&mut self, expression: &Expr) -> Result<Value, InterpreterError> {
         match expression {
-            Expr::Literal { value } => Ok(value),
+            Expr::Literal { value } => Ok(value.clone()),
             Expr::Variable { name } => match self.environment.get(&name.lexeme) {
                 Some(v) => Ok(v.clone()),
                 None => Err(InterpreterError::new(
@@ -115,7 +124,7 @@ impl Interpreter {
                 )),
             },
             Expr::Assign { name, value } => {
-                let value = self.evaluate_expr(*value)?;
+                let value = self.evaluate_expr(value)?;
                 match self.environment.get_mut(&name.lexeme) {
                     Some(v) => {
                         *v = value;
@@ -127,9 +136,9 @@ impl Interpreter {
                     )),
                 }
             }
-            Expr::Grouping { expr } => self.evaluate_expr(*expr),
+            Expr::Grouping { expr } => self.evaluate_expr(expr),
             Expr::Unary { operator, right } => {
-                let right = self.evaluate_expr(*right)?;
+                let right = self.evaluate_expr(right)?;
                 match operator.kind {
                     TokenKind::Minus => {
                         let right = expect_number(&operator, right)?;
@@ -144,8 +153,8 @@ impl Interpreter {
                 left,
                 right,
             } => {
-                let left = self.evaluate_expr(*left)?;
-                let right = self.evaluate_expr(*right)?;
+                let left = self.evaluate_expr(left)?;
+                let right = self.evaluate_expr(right)?;
                 match operator.kind {
                     TokenKind::Greater => {
                         match expect_strings_or_numbers(&operator, left, right)? {
@@ -211,24 +220,22 @@ impl Interpreter {
                     _ => panic!("unimplemented binary operator"),
                 }
             }
-            Expr::Ternary {
-                operator,
-                expr,
-                left,
-                right,
-            } => {
-                let expr = self.evaluate_expr(*expr)?;
+            Expr::Logical { operator, left, right } => {
+                let left = self.evaluate_expr(left)?;
                 match operator.kind {
-                    TokenKind::QuestionMark => {
-                        let expr = expect_bool(&operator, expr)?;
-                        if expr {
-                            Ok(self.evaluate_expr(*left)?)
-                        } else {
-                            Ok(self.evaluate_expr(*right)?)
+                    TokenKind::Or => {
+                        if left.is_truthy() {
+                            return Ok(left);
                         }
                     }
-                    _ => panic!("unimplemented ternary operator"),
+                    TokenKind::And => {
+                        if !left.is_truthy() {
+                            return Ok(left);
+                        }
+                    }
+                    _ => panic!("unimplemented logical operator"),
                 }
+                Ok(self.evaluate_expr(right)?)
             }
         }
     }

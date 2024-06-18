@@ -91,9 +91,8 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    Ternary {
+    Logical {
         operator: Token,
-        expr: Box<Expr>,
         left: Box<Expr>,
         right: Box<Expr>,
     },
@@ -138,10 +137,9 @@ impl Expr {
         }
     }
 
-    pub fn ternary(operator: Token, expr: Expr, left: Expr, right: Expr) -> Self {
-        Self::Ternary {
+    pub fn logical(operator: Token, left: Expr, right: Expr) -> Self {
+        Self::Logical {
             operator,
-            expr: Box::new(expr),
             left: Box::new(left),
             right: Box::new(right),
         }
@@ -156,10 +154,28 @@ impl Expr {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Block { statements: Vec<Stmt> },
-    Expression { expr: Expr },
-    Print { expr: Expr },
-    Var { name: Token, initializer: Expr },
+    Expression {
+        expr: Expr,
+    },
+    Print {
+        expr: Expr,
+    },
+    Var {
+        name: Token,
+        initializer: Expr,
+    },
+    Block {
+        statements: Vec<Stmt>,
+    },
+    If {
+        condition: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
+    While {
+        condition: Expr,
+        body: Box<Stmt>,
+    }
 }
 
 impl Stmt {
@@ -173,6 +189,25 @@ impl Stmt {
 
     pub fn var(name: Token, initializer: Expr) -> Self {
         Self::Var { name, initializer }
+    }
+
+    pub fn block(statements: Vec<Stmt>) -> Self {
+        Self::Block { statements }
+    }
+
+    pub fn if_statement(condition: Expr, then_branch: Stmt, else_branch: Option<Stmt>) -> Self {
+        Self::If {
+            condition,
+            then_branch: Box::new(then_branch),
+            else_branch: else_branch.map(|x| Box::new(x)),
+        }
+    }
+
+    pub fn while_statement(condition: Expr, body: Stmt) -> Self {
+        Self::While {
+            condition,
+            body: Box::new(body),
+        }
     }
 }
 
@@ -212,18 +247,16 @@ impl AstPrint for Expr {
                     right.ast_print()
                 )
             }
-            Self::Ternary {
+            Self::Logical {
                 operator,
-                expr,
                 left,
                 right,
             } => {
                 format!(
-                    "({} {} {} {})",
+                    "({} {} {})",
                     operator.lexeme,
-                    expr.ast_print(),
                     left.ast_print(),
-                    right.ast_print(),
+                    right.ast_print()
                 )
             }
             Self::Grouping { expr } => {
@@ -236,18 +269,43 @@ impl AstPrint for Expr {
 impl AstPrint for Stmt {
     fn ast_print(&self) -> String {
         match self {
+            Self::Expression { expr } => format!("{};", expr.ast_print()),
+            Self::Print { expr } => format!("print {};", expr.ast_print()),
+            Self::Var { name, initializer } => {
+                format!("var {} = {};", name.lexeme, initializer.ast_print())
+            }
             Self::Block { statements } => {
                 let block_str = statements
                     .iter()
-                    .map(|x| format!("  {}", x.ast_print()))
+                    .map(|x| format!("{}", x.ast_print()))
                     .collect::<Vec<String>>()
                     .join("\n");
                 format!("{{\n{block_str}\n}}")
             }
-            Self::Expression { expr } => format!("expression {};", expr.ast_print()),
-            Self::Print { expr } => format!("print {};", expr.ast_print()),
-            Self::Var { name, initializer } => {
-                format!("var {} = {};", name.lexeme, initializer.ast_print())
+            Self::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                format!(
+                    "if {} {}{}",
+                    condition.ast_print(),
+                    then_branch.ast_print(),
+                    match else_branch {
+                        Some(stmt) => format!(" else {}", stmt.ast_print()),
+                        None => String::new(),
+                    }
+                )
+            }
+            Self::While {
+                condition,
+                body,
+            } => {
+                format!(
+                    "while {} {}",
+                    condition.ast_print(),
+                    body.ast_print(),
+                )
             }
         }
     }
