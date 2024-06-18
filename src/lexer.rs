@@ -55,9 +55,7 @@ impl<'a> Lexer<'a> {
                     '-' => self.add_token(TokenKind::Minus),
                     '+' => self.add_token(TokenKind::Plus),
                     ';' => self.add_token(TokenKind::Semicolon),
-                    ':' => self.add_token(TokenKind::Colon),
                     '*' => self.add_token(TokenKind::Star),
-                    '?' => self.add_token(TokenKind::QuestionMark),
 
                     '!' => self.add_token_switch('=', TokenKind::BangEqual, TokenKind::Bang),
                     '=' => self.add_token_switch('=', TokenKind::EqualEqual, TokenKind::Equal),
@@ -262,10 +260,8 @@ pub enum TokenKind {
     Minus,
     Plus,
     Semicolon,
-    Colon,
     Slash,
     Star,
-    QuestionMark,
     // One or two character tokens.
     Bang,
     BangEqual,

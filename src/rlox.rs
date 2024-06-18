@@ -78,7 +78,7 @@ impl RLox {
         if self.verbose {
         println!("=== INTERPRETER ===");
         }
-        self.interpreter.run(statements)?;
+        self.interpreter.run(&statements)?;
 
         Ok(())
     }
