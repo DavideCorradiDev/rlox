@@ -90,7 +90,12 @@ impl Parser {
             ParserErrorKind::MissingLeftFunBrace(kind.to_string()),
         )?;
         let body = self.block()?;
-        Ok(Stmt::function(name, params, body))
+        if let Stmt::Block { statements } = body {
+            Ok(Stmt::function(name, params, statements))
+        }
+        else {
+            panic!("expected a block statement after function")
+        }
     }
 
     fn var_declaration(&mut self) -> Result<Stmt, ParserError> {
@@ -162,6 +167,7 @@ impl Parser {
     }
 
     fn return_stmt(&mut self) -> Result<Stmt, ParserError> {
+        let keyword = self.prev();
         let expr = if matches!(self.peek().kind, TokenKind::Semicolon) {
             Expr::Literal { value: Value::Nil }
         } else {
@@ -171,7 +177,7 @@ impl Parser {
             |x| matches!(x.kind, TokenKind::Semicolon),
             ParserErrorKind::MissingSemicolonAfterReturn,
         )?;
-        Ok(Stmt::return_stmt(expr))
+        Ok(Stmt::return_stmt(keyword, expr))
     }
 
     fn block(&mut self) -> Result<Stmt, ParserError> {
@@ -295,7 +301,7 @@ impl Parser {
         if let Some(token) = self.match_optional(|x| matches!(x.kind, TokenKind::Equal)) {
             let value = self.assignment()?;
             match expr {
-                Expr::Variable { name } => Ok(Expr::assign(name, value)),
+                Expr::Variable { name, .. } => Ok(Expr::assign(name, value)),
                 _ => Err(ParserError::new(&token, ParserErrorKind::InvalidAssignment)),
             }
         } else {
@@ -536,6 +542,11 @@ impl Parser {
         token
     }
 
+    fn prev(&self) -> Token {
+        assert!(self.current > 0, "Attempting to read previous token at the start");
+        self.tokens[self.current - 1].clone()
+    }
+
     fn is_at_end(&self) -> bool {
         if let TokenKind::Eof = self.peek().kind {
             true
@@ -586,7 +597,7 @@ impl std::fmt::Display for ParserError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "[line {} at {}] Error: {}",
+            "[line {} at {}] {}",
             self.line, self.location, self.kind
         )
     }
@@ -594,52 +605,52 @@ impl std::fmt::Display for ParserError {
 
 #[derive(Debug, Clone, Error)]
 pub enum ParserErrorKind {
-    #[error("expected expression")]
+    #[error("Expected expression")]
     InvalidExpression,
-    #[error("expected ')' after expression")]
+    #[error("Expected ')' after expression")]
     UnmatchedParen,
-    #[error("expected '}}' after block")]
+    #[error("Expected '}}' after block")]
     UnmatchedBrace,
-    #[error("expected ':' after '?' and expression")]
+    #[error("Expected ':' after '?' and expression")]
     UnmatchedQuestionMark,
-    #[error("missing left-hand operand")]
+    #[error("Missing left-hand operand")]
     MissingLeftHandOperand,
-    #[error("expected ';' after expression")]
+    #[error("Expected ';' after expression")]
     MissingSemicolon,
-    #[error("expected variable name")]
+    #[error("Expected variable name")]
     MissingVarName,
-    #[error("expected '(' after 'if'")]
+    #[error("Expected '(' after 'if'")]
     MissingLeftIfParen,
-    #[error("expected ')' after 'if' condition")]
+    #[error("Expected ')' after 'if' condition")]
     MissingRightIfParen,
-    #[error("expected '(' after 'while'")]
+    #[error("Expected '(' after 'while'")]
     MissingLeftWhileParen,
-    #[error("expected ')' after 'while' condition")]
+    #[error("Expected ')' after 'while' condition")]
     MissingRightWhileParen,
-    #[error("expected '(' after 'for'")]
+    #[error("Expected '(' after 'for'")]
     MissingLeftForParen,
-    #[error("expected ')' after 'for' clauses")]
+    #[error("Expected ')' after 'for' clauses")]
     MissingRightForParen,
-    #[error("expected ';' after 'for' condition")]
+    #[error("Expected ';' after 'for' condition")]
     MissingForSemicolon,
-    #[error("expected ')' after arguments")]
+    #[error("Expected ')' after arguments")]
     MissingRightFunctionParen,
-    #[error("can't have more than {} arguments", MAX_PARAMETER_COUNT)]
+    #[error("Can't have more than {} arguments", MAX_PARAMETER_COUNT)]
     TooManyArguments,
-    #[error("invalid assignment target")]
+    #[error("Invalid assignment target")]
     InvalidAssignment,
-    #[error("expected {0} name")]
+    #[error("Expected {0} name")]
     MissingFunName(String),
-    #[error("expected '(' after {0} name")]
+    #[error("Expected '(' after {0} name")]
     MissingLeftFunParen(String),
-    #[error("expected ')' after {0} parameters")]
+    #[error("Expected ')' after {0} parameters")]
     MissingRightFunParen(String),
-    #[error("expected '{{' before {0} body")]
+    #[error("Expected '{{' before {0} body")]
     MissingLeftFunBrace(String),
-    #[error("expected parameter name")]
+    #[error("Expected parameter name")]
     MissingParameterName,
-    #[error("can't have more than {} parameters", MAX_PARAMETER_COUNT)]
+    #[error("Can't have more than {} parameters", MAX_PARAMETER_COUNT)]
     TooManyParameters,
-    #[error("expected ';' after return value")]
+    #[error("Expected ';' after return value")]
     MissingSemicolonAfterReturn,
 }

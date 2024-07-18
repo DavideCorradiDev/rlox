@@ -241,14 +241,14 @@ impl<'a> Lexer<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Token {
     pub line: usize,
     pub lexeme: String,
     pub kind: TokenKind,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum TokenKind {
     // Single-character tokens.
     LeftParen,
@@ -318,16 +318,16 @@ pub struct LexerError {
 
 impl std::fmt::Display for LexerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[line {}] Error: {}", self.line, self.kind)
+        write!(f, "[line {}] {}", self.line, self.kind)
     }
 }
 
 #[derive(Debug, Clone, Error)]
 pub enum LexerErrorKind {
-    #[error("unexpected character '{0}'")]
+    #[error("Unexpected character '{0}'")]
     UnexpectedCharacter(char),
-    #[error("unterminated string")]
+    #[error("Unterminated string")]
     UnterminatedString,
-    #[error("unterminated comment")]
+    #[error("Unterminated comment")]
     UnterminatedComment,
 }

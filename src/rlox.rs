@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use std::{fs, io};
 
-use crate::{AstPrint, Interpreter, InterpreterError, Lexer, LexerErrors, Parser, ParserErrors};
+use crate::{AstPrint, Interpreter, InterpreterError, Lexer, LexerErrors, Parser, ParserErrors, Resolver, ResolverError,};
 
 #[derive(Debug, Clone)]
 pub struct RLox {
@@ -68,7 +68,18 @@ impl RLox {
         if self.verbose {
             println!("=== PARSER ===");
         }
-        let statements = Parser::run(tokens)?;
+        let mut statements = Parser::run(tokens)?;
+        if self.verbose {
+            for statement in statements.iter() {
+                print!("{}", statement.ast_print());
+            }
+            println!("");
+        }
+
+        if self.verbose {
+            println!("=== RESOLVER ===");
+        }
+        Resolver::new().run(&mut statements)?;
         if self.verbose {
             for statement in statements.iter() {
                 print!("{}", statement.ast_print());
@@ -79,7 +90,7 @@ impl RLox {
         if self.verbose {
             println!("=== INTERPRETER ===");
         }
-        self.interpreter.evaluate_stmts(&statements)?;
+        self.interpreter.run(&statements)?;
 
         Ok(())
     }
@@ -89,10 +100,12 @@ impl RLox {
 pub enum RLoxError {
     #[error("I/O error ({0})")]
     IoError(#[from] io::Error),
-    #[error("Lexer encountered errors:\n{0}")]
+    #[error("Lexer error(s):\n{0}")]
     LexerError(#[from] LexerErrors),
-    #[error("Parser encountered errors:\n{0}")]
+    #[error("Parser error(s):\n{0}")]
     ParserError(#[from] ParserErrors),
-    #[error("Interpreter encountered error:\n{0}")]
+    #[error("Resolver error:\n{0}")]
+    ResolverError(#[from] ResolverError),
+    #[error("Interpreter error:\n{0}")]
     InterpreterError(#[from] InterpreterError),
 }

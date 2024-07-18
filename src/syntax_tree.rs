@@ -114,10 +114,14 @@ pub enum Expr {
     },
     Variable {
         name: Token,
+        scope_distance: usize,
+        var_index: usize,
     },
     Assign {
         name: Token,
         value: Box<Expr>,
+        scope_distance: usize,
+        var_index: usize,
     },
     Unary {
         operator: Token,
@@ -154,13 +158,19 @@ impl Expr {
     }
 
     pub fn variable(name: Token) -> Self {
-        Self::Variable { name }
+        Self::Variable {
+            name,
+            scope_distance: 0,
+            var_index: 0,
+        }
     }
 
     pub fn assign(name: Token, value: Expr) -> Self {
         Self::Assign {
             name,
             value: Box::new(value),
+            scope_distance: 0,
+            var_index: 0,
         }
     }
 
@@ -212,9 +222,10 @@ pub enum Stmt {
     Function {
         name: Token,
         params: Vec<Token>,
-        body: Box<Stmt>,
+        body: Vec<Stmt>,
     },
     Return {
+        keyword: Token,
         expr: Expr,
     },
     If {
@@ -245,16 +256,12 @@ impl Stmt {
         Self::Block { statements }
     }
 
-    pub fn function(name: Token, params: Vec<Token>, body: Stmt) -> Self {
-        Self::Function {
-            name,
-            params,
-            body: Box::new(body),
-        }
+    pub fn function(name: Token, params: Vec<Token>, body: Vec<Stmt>) -> Self {
+        Self::Function { name, params, body }
     }
 
-    pub fn return_stmt(expr: Expr) -> Self {
-        Self::Return { expr }
+    pub fn return_stmt(keyword: Token, expr: Expr) -> Self {
+        Self::Return { keyword, expr }
     }
 
     pub fn if_stmt(condition: Expr, then_branch: Stmt, else_branch: Option<Stmt>) -> Self {
@@ -305,8 +312,23 @@ impl AstPrint for Expr {
     fn ast_print(&self) -> String {
         match self {
             Self::Literal { value } => value.ast_print(),
-            Self::Variable { name } => format!("{}", name.lexeme),
-            Self::Assign { name, value } => format!("assign {} {}", name.lexeme, value.ast_print()),
+            Self::Variable {
+                name,
+                scope_distance,
+                var_index,
+            } => format!("{}[{scope_distance},{var_index}]", name.lexeme),
+            Self::Assign {
+                name,
+                value,
+                scope_distance,
+                var_index,
+            } => {
+                format!(
+                    "assign {}[{scope_distance}{var_index}] {}",
+                    name.lexeme,
+                    value.ast_print()
+                )
+            }
             Self::Unary { operator, right } => {
                 format!("({} {})", operator.lexeme, right.ast_print())
             }
@@ -368,10 +390,15 @@ impl AstPrint for Stmt {
                     .map(|x| x.lexeme.clone())
                     .collect::<Vec<String>>()
                     .join(", ");
-                format!("{{fun {}({params_str}){}}}", name.lexeme, body.ast_print())
+                let body_str = body
+                    .iter()
+                    .map(|x| format!("{{{}}}", x.ast_print()))
+                    .collect::<Vec<String>>()
+                    .join("");
+                format!("{{fun {}({params_str}){body_str}}}", name.lexeme)
             }
-            Self::Return { expr } => {
-                format!("{{return {}}}", expr.ast_print())
+            Self::Return { keyword, expr } => {
+                format!("{{{} {}}}", keyword.lexeme, expr.ast_print())
             }
             Self::If {
                 condition,
