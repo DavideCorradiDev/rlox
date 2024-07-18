@@ -1,6 +1,6 @@
-use thiserror::Error;
+use crate::{ClockFn, Environment, Expr, Function, Stmt, Token, TokenKind, Value};
 
-use crate::{Environment, Expr, Stmt, Token, TokenKind, Value};
+use thiserror::Error;
 
 pub enum ValuePair {
     Numbers(f64, f64),
@@ -53,45 +53,67 @@ fn expect_strings_or_numbers(
 
 #[derive(Debug, Clone)]
 pub struct Interpreter {
-    environment: Environment,
+    pub environment: Environment,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
-        Self {
-            environment: Environment::new(),
-        }
+        let mut environment = Environment::new();
+        environment.define(String::from("clock"), Value::from(ClockFn::new()));
+        Self { environment }
     }
 
-    pub fn run(&mut self, statements: &[Stmt]) -> Result<(), InterpreterError> {
-        self.evaluate_stmts(statements)
-    }
-
-    fn evaluate_stmts(&mut self, statements: &[Stmt]) -> Result<(), InterpreterError> {
+    pub fn evaluate_stmts(
+        &mut self,
+        statements: &[Stmt],
+    ) -> Result<Option<Value>, InterpreterError> {
         for statement in statements {
-            self.evaluate_stmt(statement)?;
+            match self.evaluate_stmt(statement)? {
+                Some(v) => {
+                    return Ok(Some(v));
+                }
+                None => (),
+            }
         }
-        Ok(())
+        Ok(None)
     }
 
-    fn evaluate_stmt(&mut self, statement: &Stmt) -> Result<(), InterpreterError> {
+    pub fn evaluate_stmt(&mut self, statement: &Stmt) -> Result<Option<Value>, InterpreterError> {
         match statement {
             Stmt::Expression { expr } => {
                 self.evaluate_expr(&expr)?;
+                Ok(None)
             }
             Stmt::Print { expr } => {
                 let value = self.evaluate_expr(&expr)?;
                 println!("{}", value.to_string());
+                Ok(None)
             }
             Stmt::Var { name, initializer } => {
                 let value = self.evaluate_expr(&initializer)?;
                 self.environment.define(name.lexeme.clone(), value);
+                Ok(None)
             }
             Stmt::Block { statements } => {
                 self.environment.push_scope();
                 let result = self.evaluate_stmts(&statements);
                 self.environment.pop_scope();
-                return result;
+                result
+            }
+            Stmt::Function { name, params, body } => {
+                self.environment.define(
+                    name.lexeme.clone(),
+                    Value::from(Function {
+                        name: name.clone(),
+                        params: params.clone(),
+                        body: *body.clone(),
+                    }),
+                );
+                Ok(None)
+            }
+            Stmt::Return { expr } => {
+                let value = self.evaluate_expr(expr)?;
+                Ok(Some(value))
             }
             Stmt::If {
                 condition,
@@ -99,18 +121,23 @@ impl Interpreter {
                 else_branch,
             } => {
                 if self.evaluate_expr(&condition)?.is_truthy() {
-                    self.evaluate_stmt(then_branch)?;
+                    self.evaluate_stmt(then_branch)
                 } else if let Some(else_branch) = else_branch {
-                    self.evaluate_stmt(else_branch)?;
+                    self.evaluate_stmt(else_branch)
+                } else {
+                    Ok(None)
                 }
             }
             Stmt::While { condition, body } => {
                 while self.evaluate_expr(&condition)?.is_truthy() {
-                    self.evaluate_stmt(body)?;
+                    match self.evaluate_stmt(body)? {
+                        Some(v) => return Ok(Some(v)),
+                        None => (),
+                    }
                 }
+                Ok(None)
             }
         }
-        Ok(())
     }
 
     fn evaluate_expr(&mut self, expression: &Expr) -> Result<Value, InterpreterError> {
@@ -220,7 +247,41 @@ impl Interpreter {
                     _ => panic!("unimplemented binary operator"),
                 }
             }
-            Expr::Logical { operator, left, right } => {
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => {
+                let callee = self.evaluate_expr(callee)?;
+                let arguments = arguments
+                    .iter()
+                    .map(|x| self.evaluate_expr(x))
+                    .collect::<Result<Vec<_>, _>>()?;
+                match callee {
+                    Value::Callable(c) => {
+                        if arguments.len() != c.arity() {
+                            Err(InterpreterError::new(
+                                &paren,
+                                InterpreterErrorKind::MismatchedArity(c.arity(), arguments.len()),
+                            ))
+                        } else {
+                            self.environment.push_scope();
+                            let result = c.call(self, arguments);
+                            self.environment.pop_scope();
+                            result
+                        }
+                    }
+                    _ => Err(InterpreterError::new(
+                        &paren,
+                        InterpreterErrorKind::InvalidCall,
+                    )),
+                }
+            }
+            Expr::Logical {
+                operator,
+                left,
+                right,
+            } => {
                 let left = self.evaluate_expr(left)?;
                 match operator.kind {
                     TokenKind::Or => {
@@ -289,4 +350,8 @@ pub enum InterpreterErrorKind {
     DivisionByZero,
     #[error("undefined variable")]
     UndefinedVariable,
+    #[error("can only call functions and classes")]
+    InvalidCall,
+    #[error("expected {0} arguments but got {1}")]
+    MismatchedArity(usize, usize),
 }

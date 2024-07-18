@@ -11,7 +11,7 @@ struct Args {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    let mut rlox= RLox::new(args.verbose);
+    let mut rlox = RLox::new(args.verbose);
     match args.file_path {
         Some(file_path) => rlox.run_file(&file_path)?,
         None => rlox.run_prompt()?,

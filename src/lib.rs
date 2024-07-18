@@ -7,6 +7,9 @@ pub use lexer::*;
 mod syntax_tree;
 pub use syntax_tree::*;
 
+mod callable;
+pub use callable::*;
+
 mod parser;
 pub use parser::*;
 

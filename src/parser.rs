@@ -2,6 +2,8 @@ use crate::{Expr, Stmt, Token, TokenKind, Value};
 
 use thiserror::Error;
 
+const MAX_PARAMETER_COUNT: usize = 255;
+
 #[derive(Debug, Clone)]
 pub struct Parser {
     tokens: Vec<Token>,
@@ -35,6 +37,11 @@ impl Parser {
 
     fn declaration(&mut self) -> Result<Stmt, ParserError> {
         if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Fun))
+            .is_some()
+        {
+            self.function("function")
+        } else if self
             .match_optional(|x| matches!(x.kind, TokenKind::Var))
             .is_some()
         {
@@ -42,6 +49,48 @@ impl Parser {
         } else {
             self.statement()
         }
+    }
+
+    fn function(&mut self, kind: &str) -> Result<Stmt, ParserError> {
+        let name = self.consume(
+            |x| matches!(x.kind, TokenKind::Identifier(_)),
+            ParserErrorKind::MissingFunName(kind.to_string()),
+        )?;
+        self.consume(
+            |x| matches!(x.kind, TokenKind::LeftParen),
+            ParserErrorKind::MissingLeftFunParen(kind.to_string()),
+        )?;
+        let mut params = Vec::new();
+        if !matches!(self.peek().kind, TokenKind::RightParen) {
+            loop {
+                if params.len() >= MAX_PARAMETER_COUNT {
+                    return Err(ParserError::new(
+                        &self.peek(),
+                        ParserErrorKind::TooManyParameters,
+                    ));
+                }
+                params.push(self.consume(
+                    |x| matches!(x.kind, TokenKind::Identifier(_)),
+                    ParserErrorKind::MissingParameterName,
+                )?);
+                if self
+                    .match_optional(|x| matches!(x.kind, TokenKind::Comma))
+                    .is_none()
+                {
+                    break;
+                }
+            }
+        }
+        self.consume(
+            |x| matches!(x.kind, TokenKind::RightParen),
+            ParserErrorKind::MissingRightFunParen(kind.to_string()),
+        )?;
+        self.consume(
+            |x| matches!(x.kind, TokenKind::LeftBrace),
+            ParserErrorKind::MissingLeftFunBrace(kind.to_string()),
+        )?;
+        let body = self.block()?;
+        Ok(Stmt::function(name, params, body))
     }
 
     fn var_declaration(&mut self) -> Result<Stmt, ParserError> {
@@ -72,33 +121,38 @@ impl Parser {
             .match_optional(|x| matches!(x.kind, TokenKind::Print))
             .is_some()
         {
-            self.print_statement()
+            self.print_stmt()
+        } else if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Return))
+            .is_some()
+        {
+            self.return_stmt()
         } else if self
             .match_optional(|x| matches!(x.kind, TokenKind::LeftBrace))
             .is_some()
         {
-            self.block_statement()
+            self.block()
         } else if self
             .match_optional(|x| matches!(x.kind, TokenKind::If))
             .is_some()
         {
-            self.if_statement()
+            self.if_stmt()
         } else if self
             .match_optional(|x| matches!(x.kind, TokenKind::While))
             .is_some()
         {
-            self.while_statement()
+            self.while_stmt()
         } else if self
             .match_optional(|x| matches!(x.kind, TokenKind::For))
             .is_some()
         {
-            self.for_statement()
+            self.for_stmt()
         } else {
-            self.expression_statement()
+            self.expr_stmt()
         }
     }
 
-    fn print_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn print_stmt(&mut self) -> Result<Stmt, ParserError> {
         let expr = self.expression()?;
         self.consume(
             |x| matches!(x.kind, TokenKind::Semicolon),
@@ -107,7 +161,20 @@ impl Parser {
         Ok(Stmt::print(expr))
     }
 
-    fn block_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn return_stmt(&mut self) -> Result<Stmt, ParserError> {
+        let expr = if matches!(self.peek().kind, TokenKind::Semicolon) {
+            Expr::Literal { value: Value::Nil }
+        } else {
+            self.expression()?
+        };
+        self.consume(
+            |x| matches!(x.kind, TokenKind::Semicolon),
+            ParserErrorKind::MissingSemicolonAfterReturn,
+        )?;
+        Ok(Stmt::return_stmt(expr))
+    }
+
+    fn block(&mut self) -> Result<Stmt, ParserError> {
         let mut statements = Vec::new();
         while !self.is_at_end() && !matches!(self.peek().kind, TokenKind::RightBrace) {
             statements.push(self.declaration()?);
@@ -119,7 +186,7 @@ impl Parser {
         Ok(Stmt::block(statements))
     }
 
-    fn if_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn if_stmt(&mut self) -> Result<Stmt, ParserError> {
         self.consume(
             |x| matches!(x.kind, TokenKind::LeftParen),
             ParserErrorKind::MissingLeftIfParen,
@@ -138,10 +205,10 @@ impl Parser {
         } else {
             None
         };
-        Ok(Stmt::if_statement(condition, then_branch, else_branch))
+        Ok(Stmt::if_stmt(condition, then_branch, else_branch))
     }
 
-    fn while_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn while_stmt(&mut self) -> Result<Stmt, ParserError> {
         self.consume(
             |x| matches!(x.kind, TokenKind::LeftParen),
             ParserErrorKind::MissingLeftWhileParen,
@@ -152,10 +219,10 @@ impl Parser {
             ParserErrorKind::MissingRightWhileParen,
         )?;
         let body = self.statement()?;
-        Ok(Stmt::while_statement(condition, body))
+        Ok(Stmt::while_stmt(condition, body))
     }
 
-    fn for_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn for_stmt(&mut self) -> Result<Stmt, ParserError> {
         self.consume(
             |x| matches!(x.kind, TokenKind::LeftParen),
             ParserErrorKind::MissingLeftForParen,
@@ -172,7 +239,7 @@ impl Parser {
         {
             Some(self.var_declaration()?)
         } else {
-            Some(self.expression_statement()?)
+            Some(self.expr_stmt()?)
         };
 
         let condition = if matches!(self.peek().kind, TokenKind::Semicolon) {
@@ -201,7 +268,7 @@ impl Parser {
             body = Stmt::block(vec![body, Stmt::expression(increment)]);
         }
 
-        body = Stmt::while_statement(condition, body);
+        body = Stmt::while_stmt(condition, body);
 
         if let Some(initializer) = initializer {
             body = Stmt::block(vec![initializer, body]);
@@ -210,7 +277,7 @@ impl Parser {
         Ok(body)
     }
 
-    fn expression_statement(&mut self) -> Result<Stmt, ParserError> {
+    fn expr_stmt(&mut self) -> Result<Stmt, ParserError> {
         let expr = self.expression()?;
         self.consume(
             |x| matches!(x.kind, TokenKind::Semicolon),
@@ -287,8 +354,45 @@ impl Parser {
             let right = self.unary()?;
             Ok(Expr::unary(token, right))
         } else {
-            self.primary()
+            self.call()
         }
+    }
+
+    fn call(&mut self) -> Result<Expr, ParserError> {
+        let mut expr = self.primary()?;
+        loop {
+            if let Some(_) = self.match_optional(|x| matches!(x.kind, TokenKind::LeftParen)) {
+                expr = self.finish_call(expr)?;
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParserError> {
+        let mut arguments = Vec::new();
+        if !matches!(self.peek().kind, TokenKind::RightParen) {
+            arguments.push(Box::new(self.expression()?));
+            while let Some(_) = self.match_optional(|x| matches!(x.kind, TokenKind::Comma)) {
+                if arguments.len() >= MAX_PARAMETER_COUNT {
+                    return Err(ParserError::new(
+                        &self.peek(),
+                        ParserErrorKind::TooManyArguments,
+                    ));
+                }
+                arguments.push(Box::new(self.expression()?));
+            }
+        }
+        let paren = self.consume(
+            |x| matches!(x.kind, TokenKind::RightParen),
+            ParserErrorKind::MissingRightFunctionParen,
+        )?;
+        Ok(Expr::Call {
+            callee: Box::new(callee),
+            paren,
+            arguments,
+        })
     }
 
     fn primary(&mut self) -> Result<Expr, ParserError> {
@@ -518,6 +622,24 @@ pub enum ParserErrorKind {
     MissingRightForParen,
     #[error("expected ';' after 'for' condition")]
     MissingForSemicolon,
+    #[error("expected ')' after arguments")]
+    MissingRightFunctionParen,
+    #[error("can't have more than {} arguments", MAX_PARAMETER_COUNT)]
+    TooManyArguments,
     #[error("invalid assignment target")]
     InvalidAssignment,
+    #[error("expected {0} name")]
+    MissingFunName(String),
+    #[error("expected '(' after {0} name")]
+    MissingLeftFunParen(String),
+    #[error("expected ')' after {0} parameters")]
+    MissingRightFunParen(String),
+    #[error("expected '{{' before {0} body")]
+    MissingLeftFunBrace(String),
+    #[error("expected parameter name")]
+    MissingParameterName,
+    #[error("can't have more than {} parameters", MAX_PARAMETER_COUNT)]
+    TooManyParameters,
+    #[error("expected ';' after return value")]
+    MissingSemicolonAfterReturn,
 }
