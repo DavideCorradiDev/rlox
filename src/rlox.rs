@@ -71,14 +71,15 @@ impl RLox {
         let statements = Parser::run(tokens)?;
         if self.verbose {
             for statement in statements.iter() {
-                println!("{}", statement.ast_print());
+                print!("{}", statement.ast_print());
             }
+            println!("");
         }
 
         if self.verbose {
-        println!("=== INTERPRETER ===");
+            println!("=== INTERPRETER ===");
         }
-        self.interpreter.run(&statements)?;
+        self.interpreter.evaluate_stmts(&statements)?;
 
         Ok(())
     }

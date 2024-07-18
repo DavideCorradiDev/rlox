@@ -1,13 +1,14 @@
-use crate::Token;
+use crate::{Callable, Token};
 
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Nil,
     Bool(bool),
     Number(f64),
     String(String),
+    Callable(Box<dyn Callable>),
 }
 
 impl Value {
@@ -48,6 +49,31 @@ impl std::fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b:?}"),
             Value::Number(n) => write!(f, "{n}"),
             Value::String(s) => write!(f, "{s}"),
+            Value::Callable(c) => write!(f, "{c}"),
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Value::Nil => match other {
+                Value::Nil => true,
+                _ => false,
+            },
+            Value::Bool(l) => match other {
+                Value::Bool(r) => l == r,
+                _ => false,
+            },
+            Value::Number(l) => match other {
+                Value::Number(r) => l == r,
+                _ => false,
+            },
+            Value::String(l) => match other {
+                Value::String(r) => l == r,
+                _ => false,
+            },
+            Value::Callable(_) => false,
         }
     }
 }
@@ -70,6 +96,17 @@ impl From<String> for Value {
     }
 }
 
+impl<T> From<T> for Value
+where
+    T: Callable + 'static,
+{
+    fn from(value: T) -> Self {
+        Self::Callable(Box::new(value))
+    }
+}
+
+dyn_clone::clone_trait_object!(Callable);
+
 #[derive(Debug, Clone)]
 pub enum Expr {
     Literal {
@@ -90,6 +127,11 @@ pub enum Expr {
         operator: Token,
         left: Box<Expr>,
         right: Box<Expr>,
+    },
+    Call {
+        callee: Box<Expr>,
+        paren: Token,
+        arguments: Vec<Box<Expr>>,
     },
     Logical {
         operator: Token,
@@ -167,6 +209,14 @@ pub enum Stmt {
     Block {
         statements: Vec<Stmt>,
     },
+    Function {
+        name: Token,
+        params: Vec<Token>,
+        body: Box<Stmt>,
+    },
+    Return {
+        expr: Expr,
+    },
     If {
         condition: Expr,
         then_branch: Box<Stmt>,
@@ -175,7 +225,7 @@ pub enum Stmt {
     While {
         condition: Expr,
         body: Box<Stmt>,
-    }
+    },
 }
 
 impl Stmt {
@@ -195,7 +245,19 @@ impl Stmt {
         Self::Block { statements }
     }
 
-    pub fn if_statement(condition: Expr, then_branch: Stmt, else_branch: Option<Stmt>) -> Self {
+    pub fn function(name: Token, params: Vec<Token>, body: Stmt) -> Self {
+        Self::Function {
+            name,
+            params,
+            body: Box::new(body),
+        }
+    }
+
+    pub fn return_stmt(expr: Expr) -> Self {
+        Self::Return { expr }
+    }
+
+    pub fn if_stmt(condition: Expr, then_branch: Stmt, else_branch: Option<Stmt>) -> Self {
         Self::If {
             condition,
             then_branch: Box::new(then_branch),
@@ -203,7 +265,7 @@ impl Stmt {
         }
     }
 
-    pub fn while_statement(condition: Expr, body: Stmt) -> Self {
+    pub fn while_stmt(condition: Expr, body: Stmt) -> Self {
         Self::While {
             condition,
             body: Box::new(body),
@@ -222,7 +284,20 @@ impl AstPrint for Value {
             Value::Bool(b) => b.to_string(),
             Value::Number(n) => n.to_string(),
             Value::String(s) => format!("\"{s}\""),
+            Value::Callable(c) => format!("callable {c}"),
         }
+    }
+}
+
+impl<T> AstPrint for Vec<T>
+where
+    T: std::ops::Deref<Target: AstPrint>,
+{
+    fn ast_print(&self) -> String {
+        self.iter()
+            .map(|x| x.ast_print())
+            .collect::<Vec<String>>()
+            .join(", ")
     }
 }
 
@@ -247,6 +322,11 @@ impl AstPrint for Expr {
                     right.ast_print()
                 )
             }
+            Self::Call {
+                callee, arguments, ..
+            } => {
+                format!("(call {}({}))", callee.ast_print(), arguments.ast_print())
+            }
             Self::Logical {
                 operator,
                 left,
@@ -269,18 +349,29 @@ impl AstPrint for Expr {
 impl AstPrint for Stmt {
     fn ast_print(&self) -> String {
         match self {
-            Self::Expression { expr } => format!("{};", expr.ast_print()),
-            Self::Print { expr } => format!("print {};", expr.ast_print()),
+            Self::Expression { expr } => format!("{{expr {}}}", expr.ast_print()),
+            Self::Print { expr } => format!("{{print {}}}", expr.ast_print()),
             Self::Var { name, initializer } => {
-                format!("var {} = {};", name.lexeme, initializer.ast_print())
+                format!("{{var {} = {}}}", name.lexeme, initializer.ast_print())
             }
             Self::Block { statements } => {
                 let block_str = statements
                     .iter()
-                    .map(|x| format!("{}", x.ast_print()))
+                    .map(|x| format!("{{{}}}", x.ast_print()))
                     .collect::<Vec<String>>()
-                    .join("\n");
-                format!("{{\n{block_str}\n}}")
+                    .join("");
+                format!("{{block {block_str}}}")
+            }
+            Self::Function { name, params, body } => {
+                let params_str = params
+                    .iter()
+                    .map(|x| x.lexeme.clone())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                format!("{{fun {}({params_str}){}}}", name.lexeme, body.ast_print())
+            }
+            Self::Return { expr } => {
+                format!("{{return {}}}", expr.ast_print())
             }
             Self::If {
                 condition,
@@ -288,7 +379,7 @@ impl AstPrint for Stmt {
                 else_branch,
             } => {
                 format!(
-                    "if {} {}{}",
+                    "{{if {} {}{}}}",
                     condition.ast_print(),
                     then_branch.ast_print(),
                     match else_branch {
@@ -297,15 +388,8 @@ impl AstPrint for Stmt {
                     }
                 )
             }
-            Self::While {
-                condition,
-                body,
-            } => {
-                format!(
-                    "while {} {}",
-                    condition.ast_print(),
-                    body.ast_print(),
-                )
+            Self::While { condition, body } => {
+                format!("{{while {} {}}}", condition.ast_print(), body.ast_print(),)
             }
         }
     }

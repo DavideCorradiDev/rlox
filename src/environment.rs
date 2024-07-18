@@ -29,7 +29,7 @@ impl Scope {
 
 #[derive(Debug, Clone)]
 pub struct Environment {
-    scopes: Vec<Scope>
+    scopes: Vec<Scope>,
 }
 
 impl Environment {
@@ -39,13 +39,16 @@ impl Environment {
         }
     }
     pub fn define(&mut self, name: String, value: Value) {
-        self.scopes.last_mut().expect("missing scope").define(name, value);
+        self.scopes
+            .last_mut()
+            .expect("missing scope")
+            .define(name, value);
     }
 
     pub fn get(&self, name: &str) -> Option<&Value> {
         for scope in self.scopes.iter().rev() {
             if let Some(var) = scope.get(name) {
-                return Some(var)
+                return Some(var);
             }
         }
         None
@@ -54,7 +57,7 @@ impl Environment {
     pub fn get_mut(&mut self, name: &str) -> Option<&mut Value> {
         for scope in self.scopes.iter_mut().rev() {
             if let Some(var) = scope.get_mut(name) {
-                return Some(var)
+                return Some(var);
             }
         }
         None
@@ -65,7 +68,10 @@ impl Environment {
     }
 
     pub fn pop_scope(&mut self) {
-        assert!(self.scopes.len() > 1);
+        assert!(
+            self.scopes.len() > 1,
+            "the last remaining (global) scope can't be popped"
+        );
         self.scopes.pop();
     }
 }
