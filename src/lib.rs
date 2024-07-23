@@ -13,8 +13,11 @@ pub use callable::*;
 mod parser;
 pub use parser::*;
 
+mod environment;
+pub use environment::*;
+
 mod interpreter;
 pub use interpreter::*;
 
-mod environment;
-pub use environment::*;
+mod resolver;
+pub use resolver::*;

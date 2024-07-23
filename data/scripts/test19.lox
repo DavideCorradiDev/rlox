@@ -1,0 +1,5 @@
+fun fib(n) {
+    print(n);
+}
+
+print("Hello world!");

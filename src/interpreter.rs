@@ -59,14 +59,19 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new() -> Self {
         let mut environment = Environment::new();
-        environment.define(String::from("clock"), Value::from(ClockFn::new()));
+        environment.define(Value::from(ClockFn::new()));
         Self { environment }
     }
 
-    pub fn evaluate_stmts(
-        &mut self,
-        statements: &[Stmt],
-    ) -> Result<Option<Value>, InterpreterError> {
+    pub fn with_environment(environment: Environment) -> Self {
+        Self { environment }
+    }
+
+    pub fn run(&mut self, statements: &[Stmt]) -> Result<Option<Value>, InterpreterError> {
+        self.evaluate_stmts(statements)
+    }
+
+    fn evaluate_stmts(&mut self, statements: &[Stmt]) -> Result<Option<Value>, InterpreterError> {
         for statement in statements {
             match self.evaluate_stmt(statement)? {
                 Some(v) => {
@@ -78,7 +83,7 @@ impl Interpreter {
         Ok(None)
     }
 
-    pub fn evaluate_stmt(&mut self, statement: &Stmt) -> Result<Option<Value>, InterpreterError> {
+    fn evaluate_stmt(&mut self, statement: &Stmt) -> Result<Option<Value>, InterpreterError> {
         match statement {
             Stmt::Expression { expr } => {
                 self.evaluate_expr(&expr)?;
@@ -89,9 +94,9 @@ impl Interpreter {
                 println!("{}", value.to_string());
                 Ok(None)
             }
-            Stmt::Var { name, initializer } => {
+            Stmt::Var { initializer, .. } => {
                 let value = self.evaluate_expr(&initializer)?;
-                self.environment.define(name.lexeme.clone(), value);
+                self.environment.define(value);
                 Ok(None)
             }
             Stmt::Block { statements } => {
@@ -101,17 +106,15 @@ impl Interpreter {
                 result
             }
             Stmt::Function { name, params, body } => {
-                self.environment.define(
-                    name.lexeme.clone(),
-                    Value::from(Function {
-                        name: name.clone(),
-                        params: params.clone(),
-                        body: *body.clone(),
-                    }),
-                );
+                self.environment.define(Value::from(Function {
+                    name: name.clone(),
+                    params: params.clone(),
+                    body: body.clone(),
+                    closure: self.environment.get_scope(),
+                }));
                 Ok(None)
             }
-            Stmt::Return { expr } => {
+            Stmt::Return { expr, .. } => {
                 let value = self.evaluate_expr(expr)?;
                 Ok(Some(value))
             }
@@ -143,25 +146,25 @@ impl Interpreter {
     fn evaluate_expr(&mut self, expression: &Expr) -> Result<Value, InterpreterError> {
         match expression {
             Expr::Literal { value } => Ok(value.clone()),
-            Expr::Variable { name } => match self.environment.get(&name.lexeme) {
-                Some(v) => Ok(v.clone()),
-                None => Err(InterpreterError::new(
-                    &name,
-                    InterpreterErrorKind::UndefinedVariable,
-                )),
-            },
-            Expr::Assign { name, value } => {
+            Expr::Variable {
+                scope_distance,
+                var_index,
+                ..
+            } => Ok(self
+                .environment
+                .get(*scope_distance, *var_index)
+                .borrow()
+                .clone()),
+            Expr::Assign {
+                value,
+                scope_distance,
+                var_index,
+                ..
+            } => {
                 let value = self.evaluate_expr(value)?;
-                match self.environment.get_mut(&name.lexeme) {
-                    Some(v) => {
-                        *v = value;
-                        Ok(v.clone())
-                    }
-                    None => Err(InterpreterError::new(
-                        &name,
-                        InterpreterErrorKind::UndefinedVariable,
-                    )),
-                }
+                let var = self.environment.get(*scope_distance, *var_index).clone();
+                *var.borrow_mut() = value.clone();
+                Ok(value)
             }
             Expr::Grouping { expr } => self.evaluate_expr(expr),
             Expr::Unary { operator, right } => {
@@ -265,10 +268,7 @@ impl Interpreter {
                                 InterpreterErrorKind::MismatchedArity(c.arity(), arguments.len()),
                             ))
                         } else {
-                            self.environment.push_scope();
-                            let result = c.call(self, arguments);
-                            self.environment.pop_scope();
-                            result
+                            c.call(arguments)
                         }
                     }
                     _ => Err(InterpreterError::new(
@@ -326,32 +326,28 @@ impl InterpreterError {
 
 impl std::fmt::Display for InterpreterError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[line {} at {}] Error: {}",
-            self.line, self.location, self.kind
-        )
+        write!(f, "[line {} at {}] {}", self.line, self.location, self.kind)
     }
 }
 
 #[derive(Debug, Clone, Error)]
 pub enum InterpreterErrorKind {
-    #[error("operand must be a bool")]
+    #[error("Operand must be a bool")]
     ExpectedBool,
-    #[error("operand must be a number")]
+    #[error("Operand must be a number")]
     ExpectedNumber,
-    #[error("operands must be numbers")]
+    #[error("Operands must be numbers")]
     ExpectedNumbers,
-    #[error("operands must be strings or numbers")]
+    #[error("Operands must be strings or numbers")]
     ExpectedStringsOrNumbers,
-    #[error("operands must be numbers or at least one of them must be a string")]
+    #[error("Operands must be numbers or at least one of them must be a string")]
     ExpectedNumbersOrOneString,
-    #[error("division by zero")]
+    #[error("Division by zero")]
     DivisionByZero,
-    #[error("undefined variable")]
+    #[error("Undefined variable")]
     UndefinedVariable,
-    #[error("can only call functions and classes")]
+    #[error("Can only call functions and classes")]
     InvalidCall,
-    #[error("expected {0} arguments but got {1}")]
+    #[error("Expected {0} arguments but got {1}")]
     MismatchedArity(usize, usize),
 }

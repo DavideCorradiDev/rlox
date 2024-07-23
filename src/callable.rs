@@ -1,19 +1,17 @@
-use crate::{Interpreter, InterpreterError, Stmt, Token, Value};
+use crate::{Environment, Interpreter, InterpreterError, Scope, Stmt, Token, Value};
 
 use dyn_clone::DynClone;
 
 use std::{
+    cell::RefCell,
     fmt::{Debug, Display},
+    rc::Rc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 pub trait Callable: Debug + Display + DynClone {
     fn arity(&self) -> usize;
-    fn call(
-        &self,
-        interpreter: &mut Interpreter,
-        arguments: Vec<Value>,
-    ) -> Result<Value, InterpreterError>;
+    fn call(&self, arguments: Vec<Value>) -> Result<Value, InterpreterError>;
 }
 
 #[derive(Debug, Clone)]
@@ -36,11 +34,7 @@ impl Callable for ClockFn {
         0
     }
 
-    fn call(
-        &self,
-        _interpreter: &mut crate::Interpreter,
-        _arguments: Vec<crate::Value>,
-    ) -> Result<crate::Value, crate::InterpreterError> {
+    fn call(&self, _arguments: Vec<crate::Value>) -> Result<crate::Value, crate::InterpreterError> {
         Ok(Value::Number(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -54,7 +48,8 @@ impl Callable for ClockFn {
 pub struct Function {
     pub name: Token,
     pub params: Vec<Token>,
-    pub body: Stmt,
+    pub body: Vec<Stmt>,
+    pub closure: Rc<RefCell<Scope>>,
 }
 
 impl Display for Function {
@@ -68,18 +63,12 @@ impl Callable for Function {
         self.params.len()
     }
 
-    fn call(
-        &self,
-        interpreter: &mut Interpreter,
-        arguments: Vec<Value>,
-    ) -> Result<Value, InterpreterError> {
+    fn call(&self, arguments: Vec<Value>) -> Result<Value, InterpreterError> {
+        let mut interpreter =
+            Interpreter::with_environment(Environment::with_enclosing(self.closure.clone()));
         for i in 0..self.params.len() {
-            interpreter
-                .environment
-                .define(self.params[i].lexeme.clone(), arguments[i].clone());
+            interpreter.environment.define(arguments[i].clone());
         }
-        interpreter
-            .evaluate_stmt(&self.body)
-            .map(|x| x.unwrap_or(Value::Nil))
+        interpreter.run(&self.body).map(|x| x.unwrap_or(Value::Nil))
     }
 }
