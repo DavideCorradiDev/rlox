@@ -1,0 +1,8 @@
+class Bagel {}
+var bagel = Bagel();
+bagel.a = 10;
+print bagel.a;
+bagel.a = 20;
+bagel.b = 30;
+print bagel.a;
+print bagel.b;

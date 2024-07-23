@@ -1,4 +1,4 @@
-use crate::{Expr, Stmt, Token, TokenKind, Value};
+use crate::{Expr, FunctionStmt, Stmt, Token, TokenKind, Value};
 
 use thiserror::Error;
 
@@ -37,6 +37,11 @@ impl Parser {
 
     fn declaration(&mut self) -> Result<Stmt, ParserError> {
         if self
+            .match_optional(|x| matches!(x.kind, TokenKind::Class))
+            .is_some()
+        {
+            self.class_declaration()
+        } else if self
             .match_optional(|x| matches!(x.kind, TokenKind::Fun))
             .is_some()
         {
@@ -49,6 +54,26 @@ impl Parser {
         } else {
             self.statement()
         }
+    }
+
+    fn class_declaration(&mut self) -> Result<Stmt, ParserError> {
+        let name = self.consume(
+            |x| matches!(x.kind, TokenKind::Identifier(_)),
+            ParserErrorKind::MissingClassName,
+        )?;
+        self.consume(
+            |x| matches!(x.kind, TokenKind::LeftBrace),
+            ParserErrorKind::MissingLeftClassBrace,
+        )?;
+        let mut methods = Vec::new();
+        while !self.is_at_end() && !matches!(self.peek().kind, TokenKind::RightBrace) {
+            methods.push(self.function("method")?);
+        }
+        self.consume(
+            |x| matches!(x.kind, TokenKind::RightBrace),
+            ParserErrorKind::MissingRightClassBrace,
+        )?;
+        Ok(Stmt::Class { name, methods })
     }
 
     fn function(&mut self, kind: &str) -> Result<Stmt, ParserError> {
@@ -91,9 +116,12 @@ impl Parser {
         )?;
         let body = self.block()?;
         if let Stmt::Block { statements } = body {
-            Ok(Stmt::function(name, params, statements))
-        }
-        else {
+            Ok(Stmt::function(FunctionStmt {
+                name,
+                params,
+                body: statements,
+            }))
+        } else {
             panic!("expected a block statement after function")
         }
     }
@@ -302,6 +330,7 @@ impl Parser {
             let value = self.assignment()?;
             match expr {
                 Expr::Variable { name, .. } => Ok(Expr::assign(name, value)),
+                Expr::Get { object, name } => Ok(Expr::set(*object, name, value)),
                 _ => Err(ParserError::new(&token, ParserErrorKind::InvalidAssignment)),
             }
         } else {
@@ -369,6 +398,12 @@ impl Parser {
         loop {
             if let Some(_) = self.match_optional(|x| matches!(x.kind, TokenKind::LeftParen)) {
                 expr = self.finish_call(expr)?;
+            } else if let Some(_) = self.match_optional(|x| matches!(x.kind, TokenKind::Dot)) {
+                let name = self.consume(
+                    |x| matches!(x.kind, TokenKind::Identifier(_)),
+                    ParserErrorKind::MissingPropertyIdentifier,
+                )?;
+                expr = Expr::get(expr, name);
             } else {
                 break;
             }
@@ -379,7 +414,7 @@ impl Parser {
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParserError> {
         let mut arguments = Vec::new();
         if !matches!(self.peek().kind, TokenKind::RightParen) {
-            arguments.push(Box::new(self.expression()?));
+            arguments.push(self.expression()?);
             while let Some(_) = self.match_optional(|x| matches!(x.kind, TokenKind::Comma)) {
                 if arguments.len() >= MAX_PARAMETER_COUNT {
                     return Err(ParserError::new(
@@ -387,18 +422,14 @@ impl Parser {
                         ParserErrorKind::TooManyArguments,
                     ));
                 }
-                arguments.push(Box::new(self.expression()?));
+                arguments.push(self.expression()?);
             }
         }
         let paren = self.consume(
             |x| matches!(x.kind, TokenKind::RightParen),
             ParserErrorKind::MissingRightFunctionParen,
         )?;
-        Ok(Expr::Call {
-            callee: Box::new(callee),
-            paren,
-            arguments,
-        })
+        Ok(Expr::call(callee, paren, arguments))
     }
 
     fn primary(&mut self) -> Result<Expr, ParserError> {
@@ -409,6 +440,7 @@ impl Parser {
             TokenKind::True => Ok(Expr::literal(true)),
             TokenKind::Number(n) => Ok(Expr::literal(n)),
             TokenKind::String(s) => Ok(Expr::literal(s)),
+            TokenKind::This => Ok(Expr::this(token)),
             TokenKind::Identifier(_) => Ok(Expr::variable(token)),
             TokenKind::LeftParen => {
                 let expr = self.expression()?;
@@ -543,7 +575,10 @@ impl Parser {
     }
 
     fn prev(&self) -> Token {
-        assert!(self.current > 0, "Attempting to read previous token at the start");
+        assert!(
+            self.current > 0,
+            "Attempting to read previous token at the start"
+        );
         self.tokens[self.current - 1].clone()
     }
 
@@ -595,11 +630,7 @@ impl ParserError {
 
 impl std::fmt::Display for ParserError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "[line {} at {}] {}",
-            self.line, self.location, self.kind
-        )
+        write!(f, "[line {} at {}] {}", self.line, self.location, self.kind)
     }
 }
 
@@ -653,4 +684,12 @@ pub enum ParserErrorKind {
     TooManyParameters,
     #[error("Expected ';' after return value")]
     MissingSemicolonAfterReturn,
+    #[error("Expected class name")]
+    MissingClassName,
+    #[error("Expected '{{' before class body")]
+    MissingLeftClassBrace,
+    #[error("Expected '}}' after class body")]
+    MissingRightClassBrace,
+    #[error("Expected property name after '.'")]
+    MissingPropertyIdentifier,
 }
