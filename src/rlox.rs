@@ -2,7 +2,10 @@ use thiserror::Error;
 
 use std::{fs, io};
 
-use crate::{AstPrint, Interpreter, InterpreterError, Lexer, LexerErrors, Parser, ParserErrors, Resolver, ResolverError,};
+use crate::{
+    AstPrint, Interpreter, InterpreterError, Lexer, LexerErrors, Parser, ParserErrors, Resolver,
+    ResolverError,
+};
 
 #[derive(Debug, Clone)]
 pub struct RLox {

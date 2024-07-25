@@ -1,6 +1,6 @@
-use crate::{Callable, Token};
+use crate::{Callable, Instance, Token};
 
-use std::fmt::Debug;
+use std::{fmt::Debug, rc::Rc};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -8,7 +8,8 @@ pub enum Value {
     Bool(bool),
     Number(f64),
     String(String),
-    Callable(Box<dyn Callable>),
+    Callable(Rc<dyn Callable>),
+    Instance(Instance),
 }
 
 impl Value {
@@ -50,6 +51,7 @@ impl std::fmt::Display for Value {
             Value::Number(n) => write!(f, "{n}"),
             Value::String(s) => write!(f, "{s}"),
             Value::Callable(c) => write!(f, "{c}"),
+            Value::Instance(i) => write!(f, "{}", i),
         }
     }
 }
@@ -74,6 +76,7 @@ impl PartialEq for Value {
                 _ => false,
             },
             Value::Callable(_) => false,
+            Value::Instance(_) => unimplemented!(),
         }
     }
 }
@@ -101,7 +104,22 @@ where
     T: Callable + 'static,
 {
     fn from(value: T) -> Self {
-        Self::Callable(Box::new(value))
+        Self::Callable(Rc::new(value))
+    }
+}
+
+impl<T> From<Rc<T>> for Value
+where
+    T: Callable + 'static,
+{
+    fn from(value: Rc<T>) -> Self {
+        Self::Callable(value)
+    }
+}
+
+impl From<Instance> for Value {
+    fn from(value: Instance) -> Self {
+        Self::Instance(value)
     }
 }
 
@@ -114,6 +132,11 @@ pub enum Expr {
     },
     Variable {
         name: Token,
+        scope_distance: usize,
+        var_index: usize,
+    },
+    This {
+        keyword: Token,
         scope_distance: usize,
         var_index: usize,
     },
@@ -132,15 +155,24 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    Call {
-        callee: Box<Expr>,
-        paren: Token,
-        arguments: Vec<Box<Expr>>,
-    },
     Logical {
         operator: Token,
         left: Box<Expr>,
         right: Box<Expr>,
+    },
+    Call {
+        callee: Box<Expr>,
+        paren: Token,
+        arguments: Vec<Expr>,
+    },
+    Get {
+        object: Box<Expr>,
+        name: Token,
+    },
+    Set {
+        object: Box<Expr>,
+        name: Token,
+        value: Box<Expr>,
     },
     Grouping {
         expr: Box<Expr>,
@@ -197,11 +229,49 @@ impl Expr {
         }
     }
 
+    pub fn call(callee: Expr, paren: Token, arguments: Vec<Expr>) -> Self {
+        Self::Call {
+            callee: Box::new(callee),
+            paren,
+            arguments,
+        }
+    }
+
+    pub fn get(object: Expr, name: Token) -> Self {
+        Self::Get {
+            object: Box::new(object),
+            name,
+        }
+    }
+
+    pub fn set(object: Expr, name: Token, value: Expr) -> Self {
+        Self::Set {
+            object: Box::new(object),
+            name,
+            value: Box::new(value),
+        }
+    }
+
+    pub fn this(keyword: Token) -> Self {
+        Self::This {
+            keyword,
+            scope_distance: 0,
+            var_index: 0,
+        }
+    }
+
     pub fn grouping(expr: Expr) -> Self {
         Self::Grouping {
             expr: Box::new(expr),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct FunctionStmt {
+    pub name: Token,
+    pub params: Vec<Token>,
+    pub body: Vec<Stmt>,
 }
 
 #[derive(Debug, Clone)]
@@ -220,13 +290,15 @@ pub enum Stmt {
         statements: Vec<Stmt>,
     },
     Function {
-        name: Token,
-        params: Vec<Token>,
-        body: Vec<Stmt>,
+        function: FunctionStmt,
     },
     Return {
         keyword: Token,
         expr: Expr,
+    },
+    Class {
+        name: Token,
+        methods: Vec<Stmt>,
     },
     If {
         condition: Expr,
@@ -256,8 +328,8 @@ impl Stmt {
         Self::Block { statements }
     }
 
-    pub fn function(name: Token, params: Vec<Token>, body: Vec<Stmt>) -> Self {
-        Self::Function { name, params, body }
+    pub fn function(function: FunctionStmt) -> Self {
+        Self::Function { function }
     }
 
     pub fn return_stmt(keyword: Token, expr: Expr) -> Self {
@@ -286,19 +358,13 @@ pub trait AstPrint {
 
 impl AstPrint for Value {
     fn ast_print(&self) -> String {
-        match self {
-            Value::Nil => "nil".to_string(),
-            Value::Bool(b) => b.to_string(),
-            Value::Number(n) => n.to_string(),
-            Value::String(s) => format!("\"{s}\""),
-            Value::Callable(c) => format!("callable {c}"),
-        }
+        format!("{self}")
     }
 }
 
 impl<T> AstPrint for Vec<T>
 where
-    T: std::ops::Deref<Target: AstPrint>,
+    T: AstPrint,
 {
     fn ast_print(&self) -> String {
         self.iter()
@@ -317,6 +383,13 @@ impl AstPrint for Expr {
                 scope_distance,
                 var_index,
             } => format!("{}[{scope_distance},{var_index}]", name.lexeme),
+            Self::This {
+                keyword,
+                scope_distance,
+                var_index,
+            } => {
+                format!("({}[{scope_distance},{var_index}])", keyword.lexeme)
+            }
             Self::Assign {
                 name,
                 value,
@@ -349,6 +422,21 @@ impl AstPrint for Expr {
             } => {
                 format!("(call {}({}))", callee.ast_print(), arguments.ast_print())
             }
+            Self::Get { object, name } => {
+                format!("(get {}.{})", object.ast_print(), name.lexeme)
+            }
+            Self::Set {
+                object,
+                name,
+                value,
+            } => {
+                format!(
+                    "(set {}.{} = {})",
+                    object.ast_print(),
+                    name.lexeme,
+                    value.ast_print()
+                )
+            }
             Self::Logical {
                 operator,
                 left,
@@ -368,6 +456,24 @@ impl AstPrint for Expr {
     }
 }
 
+impl AstPrint for FunctionStmt {
+    fn ast_print(&self) -> String {
+        let params_str = self
+            .params
+            .iter()
+            .map(|x| x.lexeme.clone())
+            .collect::<Vec<String>>()
+            .join(", ");
+        let body_str = self
+            .body
+            .iter()
+            .map(|x| format!("{{{}}}", x.ast_print()))
+            .collect::<Vec<String>>()
+            .join("");
+        format!("{{fun {}({params_str}){body_str}}}", self.name.lexeme)
+    }
+}
+
 impl AstPrint for Stmt {
     fn ast_print(&self) -> String {
         match self {
@@ -384,21 +490,17 @@ impl AstPrint for Stmt {
                     .join("");
                 format!("{{block {block_str}}}")
             }
-            Self::Function { name, params, body } => {
-                let params_str = params
-                    .iter()
-                    .map(|x| x.lexeme.clone())
-                    .collect::<Vec<String>>()
-                    .join(", ");
-                let body_str = body
+            Self::Function { function } => function.ast_print(),
+            Self::Return { keyword, expr } => {
+                format!("{{{} {}}}", keyword.lexeme, expr.ast_print())
+            }
+            Self::Class { name, methods } => {
+                let method_str = methods
                     .iter()
                     .map(|x| format!("{{{}}}", x.ast_print()))
                     .collect::<Vec<String>>()
                     .join("");
-                format!("{{fun {}({params_str}){body_str}}}", name.lexeme)
-            }
-            Self::Return { keyword, expr } => {
-                format!("{{{} {}}}", keyword.lexeme, expr.ast_print())
+                format!("{{class {}{method_str}", name.lexeme)
             }
             Self::If {
                 condition,

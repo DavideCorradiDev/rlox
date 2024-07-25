@@ -1,6 +1,8 @@
-use crate::{ClockFn, Environment, Expr, Function, Stmt, Token, TokenKind, Value};
+use crate::{Class, ClockFn, Environment, Expr, Function, Stmt, Token, TokenKind, Value};
 
 use thiserror::Error;
+
+use std::rc::Rc;
 
 pub enum ValuePair {
     Numbers(f64, f64),
@@ -59,7 +61,7 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new() -> Self {
         let mut environment = Environment::new();
-        environment.define(Value::from(ClockFn::new()));
+        environment.define(Value::from(Rc::new(ClockFn::new())));
         Self { environment }
     }
 
@@ -105,18 +107,28 @@ impl Interpreter {
                 self.environment.pop_scope();
                 result
             }
-            Stmt::Function { name, params, body } => {
-                self.environment.define(Value::from(Function {
-                    name: name.clone(),
-                    params: params.clone(),
-                    body: body.clone(),
-                    closure: self.environment.get_scope(),
-                }));
+            Stmt::Function { function } => {
+                self.environment.define(Value::from(Function::new(
+                    function.clone(),
+                    self.environment.clone(),
+                )));
                 Ok(None)
             }
             Stmt::Return { expr, .. } => {
                 let value = self.evaluate_expr(expr)?;
                 Ok(Some(value))
+            }
+            Stmt::Class { name, methods } => {
+                let mut class = Class::new(name.clone());
+                for method in methods {
+                    if let Stmt::Function { function } = method {
+                        class.register_method(function.clone(), self.environment.clone());
+                    } else {
+                        panic!("Only methods are allowed inside a class");
+                    }
+                }
+                self.environment.define(Value::from(class));
+                Ok(None)
             }
             Stmt::If {
                 condition,
@@ -147,6 +159,15 @@ impl Interpreter {
         match expression {
             Expr::Literal { value } => Ok(value.clone()),
             Expr::Variable {
+                scope_distance,
+                var_index,
+                ..
+            } => Ok(self
+                .environment
+                .get(*scope_distance, *var_index)
+                .borrow()
+                .clone()),
+            Expr::This {
                 scope_distance,
                 var_index,
                 ..
@@ -277,6 +298,34 @@ impl Interpreter {
                     )),
                 }
             }
+            Expr::Get { object, name } => {
+                let object = self.evaluate_expr(object)?;
+                if let Value::Instance(instance) = object {
+                    instance.get(name)
+                } else {
+                    Err(InterpreterError::new(
+                        name,
+                        InterpreterErrorKind::GetNotFromInstance,
+                    ))
+                }
+            }
+            Expr::Set {
+                object,
+                name,
+                value,
+            } => {
+                let object = self.evaluate_expr(object)?;
+                if let Value::Instance(mut instance) = object {
+                    let value = self.evaluate_expr(value)?;
+                    instance.set(name, value.clone());
+                    Ok(value)
+                } else {
+                    Err(InterpreterError::new(
+                        name,
+                        InterpreterErrorKind::SetNotFromInstance,
+                    ))
+                }
+            }
             Expr::Logical {
                 operator,
                 left,
@@ -350,4 +399,10 @@ pub enum InterpreterErrorKind {
     InvalidCall,
     #[error("Expected {0} arguments but got {1}")]
     MismatchedArity(usize, usize),
+    #[error("Only instances have properties")]
+    GetNotFromInstance,
+    #[error("Only instances have fields")]
+    SetNotFromInstance,
+    #[error("Undefined property")]
+    UndefinedProperty,
 }

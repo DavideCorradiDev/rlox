@@ -1,11 +1,29 @@
 use crate::Value;
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fmt::Display, rc::Rc};
 
 #[derive(Debug, Clone)]
 pub struct Scope {
     enclosing: Option<Rc<RefCell<Scope>>>,
     values: Vec<Rc<RefCell<Value>>>,
+}
+
+impl Display for Scope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "-----")?;
+        for (i, value) in self.values.iter().enumerate() {
+            if let Value::Instance(instance) = value.borrow().clone() {
+                write!(f, "\n{i}: ")?;
+                instance.print_with_content(f)?;
+            } else {
+                write!(f, "\n{i}: {}", value.borrow())?;
+            }
+        }
+        if let Some(enclosing) = &self.enclosing {
+            write!(f, "\n{}", enclosing.borrow())?;
+        }
+        Ok(())
+    }
 }
 
 impl Scope {
@@ -28,6 +46,12 @@ impl Scope {
 #[derive(Debug, Clone)]
 pub struct Environment {
     scope: Rc<RefCell<Scope>>,
+}
+
+impl Display for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.scope.borrow())
+    }
 }
 
 impl Environment {
@@ -73,7 +97,12 @@ impl Environment {
     }
 
     pub fn pop_scope(&mut self) {
-        let new_scope = self.scope.borrow().enclosing.clone().expect("Couldn't pop scope");
+        let new_scope = self
+            .scope
+            .borrow()
+            .enclosing
+            .clone()
+            .expect("Couldn't pop scope");
         self.scope = new_scope;
     }
 }
