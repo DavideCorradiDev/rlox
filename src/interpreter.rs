@@ -140,7 +140,8 @@ impl Interpreter {
 
                 if let Some(resolved_superclass) = &resolved_superclass {
                     self.environment.push_scope();
-                    self.environment.define(Value::from(resolved_superclass.clone()));
+                    self.environment
+                        .define(Value::from(resolved_superclass.clone()));
                 }
 
                 let mut class = Class::new(name.clone(), resolved_superclass);
@@ -224,7 +225,12 @@ impl Interpreter {
                 };
                 let method = match superclass.get_method(&method.lexeme) {
                     Some(method) => method,
-                    None => return Err(InterpreterError::new(method, InterpreterErrorKind::UndefinedProperty)),
+                    None => {
+                        return Err(InterpreterError::new(
+                            method,
+                            InterpreterErrorKind::UndefinedProperty,
+                        ))
+                    }
                 };
                 Ok(Value::from(method.bind(instance)))
             }

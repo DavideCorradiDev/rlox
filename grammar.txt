@@ -1,5 +1,3 @@
-= Lox grammar
-
 program        → declaration* EOF ;
 
 declaration    → classDecl

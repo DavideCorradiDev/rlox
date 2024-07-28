@@ -414,7 +414,10 @@ impl AstPrint for Expr {
                 scope_distance,
                 var_index,
             } => {
-                format!("({}[{scope_distance},{var_index}].{})", keyword.lexeme, method.lexeme)
+                format!(
+                    "({}[{scope_distance},{var_index}].{})",
+                    keyword.lexeme, method.lexeme
+                )
             }
             Self::This {
                 keyword,
