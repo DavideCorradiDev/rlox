@@ -18,6 +18,8 @@ pub trait Callable: Debug + Display + DynClone {
     fn call(&self, arguments: Vec<Value>) -> Result<Value, InterpreterError>;
 }
 
+pub trait CallableFunction: Callable {}
+
 #[derive(Debug, Clone)]
 pub struct ClockFn {}
 
@@ -47,6 +49,8 @@ impl Callable for ClockFn {
         ))
     }
 }
+
+impl CallableFunction for ClockFn {}
 
 #[derive(Debug, Clone)]
 pub struct Function {
@@ -84,6 +88,8 @@ impl Callable for Function {
     }
 }
 
+impl CallableFunction for Function {}
+
 impl Function {
     pub fn new(function: FunctionStmt, closure: Environment) -> Self {
         Self {
@@ -106,7 +112,27 @@ impl Function {
 #[derive(Debug, Clone)]
 struct ClassData {
     name: Token,
+    superclass_data: Option<Rc<RefCell<ClassData>>>,
     methods: HashMap<String, Rc<Function>>,
+}
+
+impl ClassData {
+    pub fn register_method(&mut self, method: FunctionStmt, environment: Environment) {
+        let method_name = method.name.lexeme.clone();
+        let mut function = Function::new(method, environment);
+        function.is_initializer = method_name == String::from("init");
+        self.methods.insert(method_name, Rc::new(function));
+    }
+
+    pub fn get_method(&self, name: &str) -> Option<Rc<Function>> {
+        if let Some(method) = self.methods.get(name).map(|x| x.clone()) {
+            Some(method)
+        } else if let Some(superclass_data) = &self.superclass_data {
+            superclass_data.borrow().get_method(name)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -137,27 +163,22 @@ impl Callable for Class {
 }
 
 impl Class {
-    pub fn new(name: Token) -> Self {
+    pub fn new(name: Token, superclass: Option<Class>) -> Self {
         Self {
             data: Rc::new(RefCell::new(ClassData {
                 name,
+                superclass_data: superclass.map(|x| x.data),
                 methods: HashMap::new(),
             })),
         }
     }
 
     pub fn register_method(&mut self, method: FunctionStmt, environment: Environment) {
-        let method_name = method.name.lexeme.clone();
-        let mut function = Function::new(method, environment);
-        function.is_initializer = method_name == String::from("init");
-        self.data
-            .borrow_mut()
-            .methods
-            .insert(method_name, Rc::new(function));
+        self.data.borrow_mut().register_method(method, environment);
     }
 
     pub fn get_method(&self, name: &str) -> Option<Rc<Function>> {
-        self.data.borrow().methods.get(name).map(|x| x.clone())
+        self.data.borrow().get_method(name)
     }
 }
 
@@ -165,6 +186,12 @@ impl Class {
 struct InstanceData {
     class: Class,
     fields: HashMap<String, Value>,
+}
+
+impl InstanceData {
+    pub fn set(&mut self, name: &Token, value: Value) {
+        self.fields.insert(name.lexeme.clone(), value);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -207,10 +234,7 @@ impl Instance {
     }
 
     pub fn set(&mut self, name: &Token, value: Value) {
-        self.data
-            .borrow_mut()
-            .fields
-            .insert(name.lexeme.clone(), value);
+        self.data.borrow_mut().set(name, value);
     }
 
     pub fn print_with_content(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

@@ -1,4 +1,4 @@
-use crate::{Callable, Instance, Token};
+use crate::{Callable, CallableFunction, Class, Instance, Token};
 
 use std::{fmt::Debug, rc::Rc};
 
@@ -8,7 +8,8 @@ pub enum Value {
     Bool(bool),
     Number(f64),
     String(String),
-    Callable(Rc<dyn Callable>),
+    Function(Rc<dyn CallableFunction>),
+    Class(Class),
     Instance(Instance),
 }
 
@@ -50,7 +51,8 @@ impl std::fmt::Display for Value {
             Value::Bool(b) => write!(f, "{b:?}"),
             Value::Number(n) => write!(f, "{n}"),
             Value::String(s) => write!(f, "{s}"),
-            Value::Callable(c) => write!(f, "{c}"),
+            Value::Function(c) => write!(f, "{c}"),
+            Value::Class(c) => write!(f, "{c}"),
             Value::Instance(i) => write!(f, "{}", i),
         }
     }
@@ -75,7 +77,8 @@ impl PartialEq for Value {
                 Value::String(r) => l == r,
                 _ => false,
             },
-            Value::Callable(_) => false,
+            Value::Function(_) => false,
+            Value::Class(_) => false,
             Value::Instance(_) => unimplemented!(),
         }
     }
@@ -99,21 +102,27 @@ impl From<String> for Value {
     }
 }
 
+impl From<Class> for Value {
+    fn from(value: Class) -> Self {
+        Self::Class(value)
+    }
+}
+
 impl<T> From<T> for Value
 where
-    T: Callable + 'static,
+    T: CallableFunction + 'static,
 {
     fn from(value: T) -> Self {
-        Self::Callable(Rc::new(value))
+        Self::Function(Rc::new(value))
     }
 }
 
 impl<T> From<Rc<T>> for Value
 where
-    T: Callable + 'static,
+    T: CallableFunction + 'static,
 {
     fn from(value: Rc<T>) -> Self {
-        Self::Callable(value)
+        Self::Function(value)
     }
 }
 
@@ -132,6 +141,12 @@ pub enum Expr {
     },
     Variable {
         name: Token,
+        scope_distance: usize,
+        var_index: usize,
+    },
+    Super {
+        keyword: Token,
+        method: Token,
         scope_distance: usize,
         var_index: usize,
     },
@@ -252,6 +267,15 @@ impl Expr {
         }
     }
 
+    pub fn super_expr(keyword: Token, method: Token) -> Self {
+        Self::Super {
+            keyword,
+            method,
+            scope_distance: 0,
+            var_index: 0,
+        }
+    }
+
     pub fn this(keyword: Token) -> Self {
         Self::This {
             keyword,
@@ -298,6 +322,7 @@ pub enum Stmt {
     },
     Class {
         name: Token,
+        superclass: Option<Expr>,
         methods: Vec<Stmt>,
     },
     If {
@@ -383,6 +408,14 @@ impl AstPrint for Expr {
                 scope_distance,
                 var_index,
             } => format!("{}[{scope_distance},{var_index}]", name.lexeme),
+            Self::Super {
+                keyword,
+                method,
+                scope_distance,
+                var_index,
+            } => {
+                format!("({}[{scope_distance},{var_index}].{})", keyword.lexeme, method.lexeme)
+            }
             Self::This {
                 keyword,
                 scope_distance,
@@ -494,13 +527,21 @@ impl AstPrint for Stmt {
             Self::Return { keyword, expr } => {
                 format!("{{{} {}}}", keyword.lexeme, expr.ast_print())
             }
-            Self::Class { name, methods } => {
+            Self::Class {
+                name,
+                superclass,
+                methods,
+            } => {
                 let method_str = methods
                     .iter()
                     .map(|x| format!("{{{}}}", x.ast_print()))
                     .collect::<Vec<String>>()
                     .join("");
-                format!("{{class {}{method_str}", name.lexeme)
+                let superclass_str = match superclass {
+                    Some(superclass) => format!("({})", superclass.ast_print()),
+                    None => String::new(),
+                };
+                format!("{{class {}{superclass_str}{method_str}", name.lexeme)
             }
             Self::If {
                 condition,

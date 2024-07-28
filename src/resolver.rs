@@ -12,6 +12,13 @@ enum FunctionKind {
     Initializer,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClassKind {
+    None,
+    Class,
+    Subclass,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct VariableInfo {
     state: VariableState,
@@ -53,6 +60,7 @@ impl Display for Scopes {
 pub struct Resolver {
     scopes: Scopes,
     current_function: FunctionKind,
+    current_class: ClassKind,
 }
 
 impl Resolver {
@@ -73,6 +81,7 @@ impl Resolver {
         Self {
             scopes: Scopes(vec![global_scope]),
             current_function: FunctionKind::None,
+            current_class: ClassKind::None,
         }
     }
 
@@ -109,9 +118,43 @@ impl Resolver {
             Stmt::Expression { expr } => {
                 self.resolve_expr(expr)?;
             }
-            Stmt::Class { name, methods } => {
+            Stmt::Class {
+                name,
+                superclass,
+                methods,
+            } => {
                 self.declare(name)?;
                 self.define(name);
+
+                if let Some(superclass) = superclass {
+                    if let Expr::Variable {
+                        name: superclass_name,
+                        ..
+                    } = superclass
+                    {
+                        if name.lexeme == superclass_name.lexeme {
+                            return Err(ResolverError::new(
+                                &superclass_name,
+                                ResolverErrorKind::SuperclassOfSelf,
+                            ));
+                        }
+                    } else {
+                        return Err(ResolverError::new(
+                            name,
+                            ResolverErrorKind::SuperclassIsNotIdentifier,
+                        ));
+                    }
+                    self.resolve_expr(superclass)?;
+                }
+
+                if superclass.is_some() {
+                    self.current_class = ClassKind::Subclass;
+                    self.push_scope();
+                    self.declare_super(name.clone());
+                } else {
+                    self.current_class = ClassKind::Class;
+                }
+
                 for method in methods {
                     if let Stmt::Function { function } = method {
                         let function_kind = if function.name.lexeme == String::from("init") {
@@ -124,6 +167,12 @@ impl Resolver {
                         panic!("Only methods are allowed inside a class")
                     }
                 }
+
+                if superclass.is_some() {
+                    self.pop_scope()?;
+                }
+
+                self.current_class = ClassKind::None;
             }
             Stmt::If {
                 condition,
@@ -219,6 +268,28 @@ impl Resolver {
                 self.resolve_expr(object)?;
                 self.resolve_expr(value)?;
             }
+            Expr::Super {
+                keyword,
+                scope_distance,
+                var_index,
+                ..
+            } => match self.current_class {
+                ClassKind::None => {
+                    return Err(ResolverError::new(
+                        keyword,
+                        ResolverErrorKind::SuperOutsideClass,
+                    ))
+                }
+                ClassKind::Class => {
+                    return Err(ResolverError::new(
+                        keyword,
+                        ResolverErrorKind::SuperWithoutSuperclass,
+                    ))
+                }
+                ClassKind::Subclass => {
+                    (*scope_distance, *var_index) = self.resolve_variable(keyword)?
+                }
+            },
             Expr::This {
                 keyword,
                 scope_distance,
@@ -298,6 +369,11 @@ impl Resolver {
 
     fn declare_this(&mut self, mut name: Token) {
         name.lexeme = String::from("this");
+        self.declare_used(name);
+    }
+
+    fn declare_super(&mut self, mut name: Token) {
+        name.lexeme = String::from("super");
         self.declare_used(name);
     }
 
@@ -420,4 +496,12 @@ pub enum ResolverErrorKind {
     TopLevelReturn,
     #[error("Can't return from initializer")]
     InitializerReturn,
+    #[error("Expected an identifier as superclass")]
+    SuperclassIsNotIdentifier,
+    #[error("A class can't inherit from itself")]
+    SuperclassOfSelf,
+    #[error("Can't use 'super' outside of a class")]
+    SuperOutsideClass,
+    #[error("Can't use 'super' in a class with no superclass")]
+    SuperWithoutSuperclass,
 }

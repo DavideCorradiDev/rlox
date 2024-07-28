@@ -1,4 +1,4 @@
-use crate::{Class, ClockFn, Environment, Expr, Function, Stmt, Token, TokenKind, Value};
+use crate::{Callable, Class, ClockFn, Environment, Expr, Function, Stmt, Token, TokenKind, Value};
 
 use thiserror::Error;
 
@@ -118,8 +118,32 @@ impl Interpreter {
                 let value = self.evaluate_expr(expr)?;
                 Ok(Some(value))
             }
-            Stmt::Class { name, methods } => {
-                let mut class = Class::new(name.clone());
+            Stmt::Class {
+                name,
+                superclass,
+                methods,
+            } => {
+                let resolved_superclass = match superclass {
+                    Some(superclass) => {
+                        let superclass = self.evaluate_expr(superclass)?;
+                        if let Value::Class(superclass) = superclass {
+                            Some(superclass)
+                        } else {
+                            return Err(InterpreterError::new(
+                                name,
+                                InterpreterErrorKind::InvalidSuperclass,
+                            ));
+                        }
+                    }
+                    None => None,
+                };
+
+                if let Some(resolved_superclass) = &resolved_superclass {
+                    self.environment.push_scope();
+                    self.environment.define(Value::from(resolved_superclass.clone()));
+                }
+
+                let mut class = Class::new(name.clone(), resolved_superclass);
                 for method in methods {
                     if let Stmt::Function { function } = method {
                         class.register_method(function.clone(), self.environment.clone());
@@ -127,6 +151,11 @@ impl Interpreter {
                         panic!("Only methods are allowed inside a class");
                     }
                 }
+
+                if superclass.is_some() {
+                    self.environment.pop_scope();
+                }
+
                 self.environment.define(Value::from(class));
                 Ok(None)
             }
@@ -167,6 +196,38 @@ impl Interpreter {
                 .get(*scope_distance, *var_index)
                 .borrow()
                 .clone()),
+            Expr::Super {
+                method,
+                scope_distance,
+                var_index,
+                ..
+            } => {
+                let superclass = if let Value::Class(c) = self
+                    .environment
+                    .get(*scope_distance, *var_index)
+                    .borrow()
+                    .clone()
+                {
+                    c
+                } else {
+                    panic!("Superclass is not a class!")
+                };
+                let instance = if let Value::Instance(i) = self
+                    .environment
+                    .get(*scope_distance - 1, 0)
+                    .borrow()
+                    .clone()
+                {
+                    i
+                } else {
+                    panic!("Object is not an instance")
+                };
+                let method = match superclass.get_method(&method.lexeme) {
+                    Some(method) => method,
+                    None => return Err(InterpreterError::new(method, InterpreterErrorKind::UndefinedProperty)),
+                };
+                Ok(Value::from(method.bind(instance)))
+            }
             Expr::This {
                 scope_distance,
                 var_index,
@@ -282,7 +343,17 @@ impl Interpreter {
                     .map(|x| self.evaluate_expr(x))
                     .collect::<Result<Vec<_>, _>>()?;
                 match callee {
-                    Value::Callable(c) => {
+                    Value::Function(c) => {
+                        if arguments.len() != c.arity() {
+                            Err(InterpreterError::new(
+                                &paren,
+                                InterpreterErrorKind::MismatchedArity(c.arity(), arguments.len()),
+                            ))
+                        } else {
+                            c.call(arguments)
+                        }
+                    }
+                    Value::Class(c) => {
                         if arguments.len() != c.arity() {
                             Err(InterpreterError::new(
                                 &paren,
@@ -405,4 +476,6 @@ pub enum InterpreterErrorKind {
     SetNotFromInstance,
     #[error("Undefined property")]
     UndefinedProperty,
+    #[error("Superclass must be a class")]
+    InvalidSuperclass,
 }

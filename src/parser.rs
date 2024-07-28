@@ -61,6 +61,16 @@ impl Parser {
             |x| matches!(x.kind, TokenKind::Identifier(_)),
             ParserErrorKind::MissingClassName,
         )?;
+        let superclass = if let Some(_) = self.match_optional(|x| matches!(x.kind, TokenKind::Less))
+        {
+            let superclass = self.consume(
+                |x| matches!(x.kind, TokenKind::Identifier(_)),
+                ParserErrorKind::MissingSuperclassName,
+            )?;
+            Some(Expr::variable(superclass))
+        } else {
+            None
+        };
         self.consume(
             |x| matches!(x.kind, TokenKind::LeftBrace),
             ParserErrorKind::MissingLeftClassBrace,
@@ -73,7 +83,7 @@ impl Parser {
             |x| matches!(x.kind, TokenKind::RightBrace),
             ParserErrorKind::MissingRightClassBrace,
         )?;
-        Ok(Stmt::Class { name, methods })
+        Ok(Stmt::Class { name, superclass, methods })
     }
 
     fn function(&mut self, kind: &str) -> Result<Stmt, ParserError> {
@@ -440,6 +450,11 @@ impl Parser {
             TokenKind::True => Ok(Expr::literal(true)),
             TokenKind::Number(n) => Ok(Expr::literal(n)),
             TokenKind::String(s) => Ok(Expr::literal(s)),
+            TokenKind::Super => {
+                self.consume(|x| matches!(x.kind, TokenKind::Dot), ParserErrorKind::MissingDotAfterSuper)?;
+                let method = self.consume(|x| matches!(x.kind, TokenKind::Identifier(_)), ParserErrorKind::MissingSuperMethod)?;
+                Ok(Expr::super_expr(token, method))
+            }
             TokenKind::This => Ok(Expr::this(token)),
             TokenKind::Identifier(_) => Ok(Expr::variable(token)),
             TokenKind::LeftParen => {
@@ -686,10 +701,16 @@ pub enum ParserErrorKind {
     MissingSemicolonAfterReturn,
     #[error("Expected class name")]
     MissingClassName,
+    #[error("Expected superclass name")]
+    MissingSuperclassName,
     #[error("Expected '{{' before class body")]
     MissingLeftClassBrace,
     #[error("Expected '}}' after class body")]
     MissingRightClassBrace,
     #[error("Expected property name after '.'")]
     MissingPropertyIdentifier,
+    #[error("Expected '.' after 'super'")]
+    MissingDotAfterSuper,
+    #[error("Expected superclass method name")]
+    MissingSuperMethod,
 }
