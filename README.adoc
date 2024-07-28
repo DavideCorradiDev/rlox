@@ -1,4 +1,0 @@
-= RLox
-
-A Lox language interpreter written in Rust.
-Lox is the language described in the book "`crafting interpreters`".

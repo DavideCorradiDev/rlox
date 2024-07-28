@@ -83,7 +83,11 @@ impl Parser {
             |x| matches!(x.kind, TokenKind::RightBrace),
             ParserErrorKind::MissingRightClassBrace,
         )?;
-        Ok(Stmt::Class { name, superclass, methods })
+        Ok(Stmt::Class {
+            name,
+            superclass,
+            methods,
+        })
     }
 
     fn function(&mut self, kind: &str) -> Result<Stmt, ParserError> {
@@ -451,8 +455,14 @@ impl Parser {
             TokenKind::Number(n) => Ok(Expr::literal(n)),
             TokenKind::String(s) => Ok(Expr::literal(s)),
             TokenKind::Super => {
-                self.consume(|x| matches!(x.kind, TokenKind::Dot), ParserErrorKind::MissingDotAfterSuper)?;
-                let method = self.consume(|x| matches!(x.kind, TokenKind::Identifier(_)), ParserErrorKind::MissingSuperMethod)?;
+                self.consume(
+                    |x| matches!(x.kind, TokenKind::Dot),
+                    ParserErrorKind::MissingDotAfterSuper,
+                )?;
+                let method = self.consume(
+                    |x| matches!(x.kind, TokenKind::Identifier(_)),
+                    ParserErrorKind::MissingSuperMethod,
+                )?;
                 Ok(Expr::super_expr(token, method))
             }
             TokenKind::This => Ok(Expr::this(token)),

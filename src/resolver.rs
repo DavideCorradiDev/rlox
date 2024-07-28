@@ -255,11 +255,9 @@ impl Resolver {
                 callee, arguments, ..
             } => {
                 self.resolve_expr(callee)?;
-                self.push_scope();
                 for argument in arguments {
                     self.resolve_expr(argument)?;
                 }
-                self.pop_scope()?;
             }
             Expr::Get { object, .. } => {
                 self.resolve_expr(object)?;
